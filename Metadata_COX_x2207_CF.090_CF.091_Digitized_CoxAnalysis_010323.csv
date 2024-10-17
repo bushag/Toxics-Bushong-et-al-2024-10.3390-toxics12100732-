@@ -1,0 +1,43 @@
+﻿Variable,Description
+Org_Order,"Order of data entry, dummy variable used for sorting"
+Treatment,PFAS chemical treatment 
+treatasnum,Number representative of PFAS chemical treatment (Control = 1; MIX = 2; PFHxA = 3; PFHxS = 4; PFOA = 5; PFOS = 6)
+Individual_ID,Unique Individual ID assigned to animals of treatment (number out of 36)
+Time_Death,Time animal was immersed in MS-222 for euthenasia 
+Date_to_Stage,Date at which animal was identified to reach Nieuwkoop Faber stage for sampling
+ExpDay_DTS,Experimental days of exposure until animal reached Nieuwkoop Faber stage for sampling
+NF_Stage,Nieuwkoop Faber stage of animal on date of sampling
+day0,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day1,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day2,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day3,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day4,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day5,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day6,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day7,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day8,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day9,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day10,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day11,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day12,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day13,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day14,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day15,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day16,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day17,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day18,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day19,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day20,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day21,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day22,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day23,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day24,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day25,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day26,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day27,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day28,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day29,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day30,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+day31,Cox Analysis dummy coding for animal reaching Nieuwkoop Faber stage for sampling on experimental day (0 = not designated stage; 1 = reached designated stage) 
+time,Days until animal reached Nieuwkoop Faber stage for sampling
+status,Variable indicating whether animal was included or excluded for analysis (1=included; 0=excluded)
