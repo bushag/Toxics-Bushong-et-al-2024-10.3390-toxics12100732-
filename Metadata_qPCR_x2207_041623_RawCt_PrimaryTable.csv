@@ -1,0 +1,34 @@
+﻿Variable,Description
+Well,"Well number of plate (by rows, left to right)"
+Well_Position,"Well position based on grid system (i.e. A1, well of the first column and row)"
+Omit,Whether or not well was excluded during QuantStudio3 qPCR run
+Sample_Name,"Sample ID designated to well indicating quick ID of RNA extraction, date of RNA extraction that was also used to designate top of cDNA samples, PFAS chemical treatment, and individual ID number of animal "
+Treatment,PFAS chemical treatment 
+Tech_Rep,Technical replicate for qPCR reaction (run in duplicate)
+Target_Name,Gene target of qPCR reaction
+E,Efficiency calculated based on standard curves during primer verification process 
+Task,Task designated for QuantStudio3 analysis and flagging (either unknown or No-template-control (NTC))
+Reporter,Reporter dye being used for QuantStudio 3 qPCR reaction
+Quencher,Quencher being used (designated as none if no quencher used)
+CT,Raw CT value reported by QuantStudio3 (i.e. PCR cycle number at which the fluorescence meets the threshold in the amplification plot)
+Ct_Mean,Mean CT value for sample between technical duplicates
+Ct_SD,Standard deviation of CT values for technical duplicates of a sample
+Automatic_Ct_Threshold,Whether QuantStudio3 set to utilize automatic threshold setting (TRUE/FALSE)
+Ct_Threshold,Threshold for PCR cycle number automatically set by QuantStudio3 software
+Automatic_Baseline,Whether QuantStudio3 set to utilize automatic baseline setting (TRUE/FALSE)
+Baseline_Start,PCR cycle where baseline measurement started
+Baseline_End,PCR cycle where baseline measurement ended
+Amp_Status,"Designation for amplification status of well (amplification, inconclusion, or no amplification)"
+Comments,Any comments for a well input by user for qPCR run
+Cq_Conf,Confidence of QuantStudio3 software in Cq value reported (scale 0-1)
+Tm1,Melting temperature for product in well identified via melt curve
+HIGHSD,Designation by QuantStudio3 software to flag technical duplciates as having high standard deviation
+MTP,"Flag for Melt curve analysis indicating more than one peak, potentially indicating multiple products"
+Tm2,Second melt temperature for product in well identified via melt curve
+Tm3,Third melt temperature for product in well identified via melt curve
+Tm4,Fourth melt temperature for product in well identified via melt curve
+CQCONF,"Flag for Calculated Confidence in CT value designated by QuantStudio3 (i.e. Y=Yes, N=No, NA)"
+EXPFAIL,"Flag for Baseline threshold algorithm failed to identify exponential region for the amplification curve (i.e. Y=Yes, N=No, NA)"
+AMPNC,"Flag for Amplification in negative control (i.e. Y=Yes, N=No, NA)"
+PlateMap,Plate map sample belonged to (range 1-5)
+Unique_Sam_Gene_PlateMap,Unique Sample ID incoporating the Sample_Name with Target Gene and plate map number; Note this does not include technical duplicate identification.
