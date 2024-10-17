@@ -1,0 +1,2364 @@
+---
+title: "Effects of perfluorinated alkyl substances (PFAS) on amphibian body & liver condition: Is lipid metabolism being perturbed throughout metamorphosis?"
+author: "Anna Bushong"
+date: "2024-08-15"
+output: 
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+  word_document: 
+    number_sections: true
+---
+
+# Rmarkdown for Gene Expression Analysis 
+
+The following markdown includes visualization, analyses, and associated tables referenced in section 3.3.
+
+The Rmarkdown is broadly organized by NF stage and then target gene. For navigating, the outline in RStudio can be viewed in the lower left, or upon knitting the document to an html or PDF the table of content can be used.
+
+```{r 1 chunk setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setting Environment, Loading Dataframes, and Constructing Dataframes
+```{r 2 chunk packages and data, results = 'hide', warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Loading Packages:
+library(effects) # very convenient package for quickly assessing model results
+library(emmeans) # used in the calculation of model means and post-hoc tests
+library(ggplot2) # package for plots
+library(lmodel2) # package for SMA regression for smi
+library(car) # multivariate stats, specifically ancova
+library(lmerTest) # lets you output p-values with summary calls on lme4
+library(dplyr) # data manipulation
+library(tidyr) # needed for data manipulation at end of code
+library(lattice) #package essential for data visualization
+library(ggpubr) #package for ggarrange
+library(stringr) #package for plot title manipulation 
+library(rstatix) #package for identifying outliers based on IQR method
+library(multcomp) #package for post-hoc testing
+library(knitr) #for table formatting
+library(gtExtras) #for table formatting
+library(gt) #for table formatting
+library(ggbreak)
+
+
+#gene expression data -- change file path for your working directory or direct path
+x2207_primary.d <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_041623_RawCt_PrimaryTable.csv")
+
+head(x2207_primary.d)
+str(x2207_primary.d)
+#will need to turn CT numeric, so let's replace 'undetermined' 
+x2207_primary.d[x2207_primary.d == "Undetermined"] <- NA
+  #View(x2207_primary.d)
+x2207_primary.d$CT <- as.numeric(x2207_primary.d$CT)
+str(x2207_primary.d)
+
+
+#physiological data
+x2207.data <-read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_CF.090_CF.091_Digitized_071422.csv")
+  #head(x2207.data)
+
+x2207.data.filter <- x2207.data %>%
+  dplyr::select(Treatment, Individual_ID, Block, NF_Stage, SVL, Mass)
+str(x2207.data.filter)
+
+
+#Genetic sex data
+x2207.sex <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_SexDatawithRedos082323_working.csv")
+
+```
+
+## Joining df for NF Stages and Sex
+```{r 3 chunk LN FoldC, results = 'hide', warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+x2207_primary.d <- x2207_primary.d %>%
+  mutate(Sample_Name_dup = Sample_Name) %>%
+  separate(Sample_Name_dup, c("RNAE_ID", "RNAE_Date", "Individual_Treat", "Individual_No"), sep="-") %>%
+  mutate(Individual_ID = paste(Individual_Treat, Individual_No)) 
+    #renaming in order to join physio df for block information
+
+str(x2207_primary.d)
+
+#joining dataframes to have block information with the gene expression info. Note, if want body condition indices in this dataframe, need to load x2207-Analysis of Whole Animal Parameters into the environment.
+x2207_joined.df <- left_join(x2207_primary.d, x2207.data.filter, by="Individual_ID") 
+
+x2207_joined.df <- left_join(x2207_joined.df, x2207.sex, by="Individual_ID")
+
+x2207_joined.df$Sex <- as.factor(x2207_joined.df$Sex)
+
+str(x2207_joined.df)
+
+```
+
+## Subsetting and prepping for calculating fold change 
+```{r 4 chunk LN FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Subsetting dataframe to variables of interest
+x2207_subbing.d <- x2207_joined.df %>%
+  dplyr::select(Well, Sample_Name, Treatment.x, Tech_Rep, Target_Name, E, CT, Ct_Mean, Ct_SD, Unique_Sam_Gene_PlateMap, PlateMap, Individual_ID, NF_Stage, Sex, Block) 
+x2207_subbing.d$NF_Stage <- as.factor(x2207_subbing.d$NF_Stage)
+
+#Subsetting out samples with a CT < 35 as unreliable values to ensure they are not included in analysis
+#NF58
+x2207_FoldC.NF58 <- x2207_subbing.d %>%
+  filter(NF_Stage == "58") %>%
+  filter(CT < 35) %>%
+  group_by(Treatment.x, Target_Name) %>%
+  dplyr::mutate(Ct_TreatmentMean = mean(CT, na.rm=TRUE))
+#str(x2207_FoldC.NF58)
+
+#NF62
+x2207_FoldC.NF62 <- x2207_subbing.d %>%
+  filter(NF_Stage == "62") %>%
+  filter(CT < 35) %>%
+  group_by(Treatment.x, Target_Name) %>%
+  dplyr::mutate(Ct_TreatmentMean = mean(CT, na.rm=TRUE))
+#str(x2207_FoldC.NF62)
+
+#NF66
+x2207_FoldC.NF66 <- x2207_subbing.d %>%
+  filter(NF_Stage == "66") %>%
+  filter(CT < 35) %>%
+  group_by(Treatment.x, Target_Name) %>%
+  dplyr::mutate(Ct_TreatmentMean = mean(CT, na.rm=TRUE))
+#str(x2207_FoldC.NF66)
+
+
+#Creating DF of Control treatment Ct mean by target, since I need the Control group to calculate exponents
+#NF58
+  x2207_Controlmean.NF58 <- x2207_FoldC.NF58 %>%
+    filter(Treatment.x == "Control") %>%
+    select(Ct_TreatmentMean) %>%
+    dplyr::rename("Ct_ControlTreatmentMean" = "Ct_TreatmentMean") %>%
+    distinct(Target_Name, Ct_ControlTreatmentMean)
+  #str(x2207_Controlmean.NF58)
+  
+  #Joining data frames to calculate fold change later
+  #NF58
+  x2207_FoldC.NF58 <- left_join(x2207_FoldC.NF58, x2207_Controlmean.NF58, by = "Target_Name", multiple = "all")
+  #View(x2207_FoldC.NF58)
+
+#NF62
+  x2207_Controlmean.NF62 <- x2207_FoldC.NF62 %>%
+    filter(Treatment.x == "Control") %>%
+    select(Ct_TreatmentMean) %>%
+    dplyr::rename("Ct_ControlTreatmentMean" = "Ct_TreatmentMean") %>%
+    distinct(Target_Name, Ct_ControlTreatmentMean)
+  #str(x2207_Controlmean.NF62)
+  
+  #Joining data frames to calculate fold change later
+  #NF62
+  x2207_FoldC.NF62 <- left_join(x2207_FoldC.NF62, x2207_Controlmean.NF62, by = "Target_Name", multiple = "all")
+  #View(x2207_FoldC.NF62)
+
+#NF66
+  x2207_Controlmean.NF66 <- x2207_FoldC.NF66 %>%
+    filter(Treatment.x == "Control") %>%
+    select(Ct_TreatmentMean) %>%
+    dplyr::rename("Ct_ControlTreatmentMean" = "Ct_TreatmentMean") %>%
+    distinct(Target_Name, Ct_ControlTreatmentMean)
+  #str(x2207_Controlmean.NF66)
+  
+  #Joining data frames to calculate fold change later
+  #NF66
+  x2207_FoldC.NF66 <- left_join(x2207_FoldC.NF66, x2207_Controlmean.NF66, by = "Target_Name", multiple = "all")
+  #View(x2207_FoldC.NF66)
+
+```
+
+## Calculating Exponents for individuals by target gene for each NF Stage
+```{r 5 chunk exponents, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Calculating Exponents for individuals by target gene through subtracting the Ct_Mean for that target gene from the DMSO Ct treatment mean for that target gene calculated in chunk 4
+
+#NF 58
+x2207_FoldC.NF58 <- x2207_FoldC.NF58 %>%
+  group_by(Target_Name) %>%
+  mutate(Exponents = (Ct_ControlTreatmentMean - Ct_Mean)) 
+  #View(x2207_FoldC.NF58)
+
+#NF62
+x2207_FoldC.NF62 <- x2207_FoldC.NF62 %>%
+  group_by(Target_Name) %>%
+  mutate(Exponents = (Ct_ControlTreatmentMean - Ct_Mean)) 
+  #View(x2207_FoldC.NF62)
+
+#NF66
+x2207_FoldC.NF66 <- x2207_FoldC.NF66 %>%
+  group_by(Target_Name) %>%
+  mutate(Exponents = (Ct_ControlTreatmentMean - Ct_Mean))
+  #View(x2207_FoldC.NF66)
+
+```
+
+## Subsetting Target Genes and Reference Gene for each NF Stage
+```{r 6 chunk subsetting, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Subsetting experimental genes and reference gene into two dataframes, so I can join them together and have all the data needed to calculate the deltadeltaCq on the same row
+
+#NF58
+  NF58_x2207_Sub_ExperimentalGenes.df <- x2207_FoldC.NF58 %>%
+    filter(Target_Name == "FABP1" | Target_Name == "ACOX1" | Target_Name == "APOA5" | Target_Name == "PCK1")
+  #View(x2207_Sub_ExperimentalGenes.df)
+  
+  NF58_x2207_Sub_ReferenceGene.df <- x2207_FoldC.NF58 %>%
+    filter(Target_Name == "SUB1") %>%
+    dplyr::rename("ref_Ct_Mean" = "Ct_Mean")
+  #View(x2207_Sub_ReferenceGene.df)
+  
+  NF58_x2207_Sub_delta.df <- left_join(NF58_x2207_Sub_ExperimentalGenes.df, NF58_x2207_Sub_ReferenceGene.df, by = c("Sample_Name", "Tech_Rep"))      
+  #Check that these joined in the manner I wanted them too by checking the sample name matches both unique IDs, and that     the samples between the unique IDs of the experimental target gene and reference gene match. 
+    #View(NF58_x2207_Sub_delta.df) 
+  
+  #Renaming variables for clarity
+  NF58_x2207_Sub_delta.df<- NF58_x2207_Sub_delta.df %>%
+    dplyr::rename("targetEfficiency" = "E.x",
+           "targetExponentIndividual" = "Exponents.x",
+           "referenceEfficiency" = "E.y",
+           "referenceExponentIndividual" = "Exponents.y")
+  
+#NF62
+  NF62_x2207_Sub_ExperimentalGenes.df <- x2207_FoldC.NF62 %>%
+    filter(Target_Name == "FABP1" | Target_Name == "ACOX1" | Target_Name == "APOA5" | Target_Name == "PCK1")
+  #View(x2207_Sub_ExperimentalGenes.df)
+  
+  NF62_x2207_Sub_ReferenceGene.df <- x2207_FoldC.NF62 %>%
+    filter(Target_Name == "SUB1") %>%
+    dplyr::rename("ref_Ct_Mean" = "Ct_Mean")
+  #View(x2207_Sub_ReferenceGene.df)
+  
+  NF62_x2207_Sub_delta.df <- left_join(NF62_x2207_Sub_ExperimentalGenes.df, NF62_x2207_Sub_ReferenceGene.df, by = c("Sample_Name", "Tech_Rep"))      
+  #Checking that these joined in the manner I wanted them too by checking the sample name matches both unique IDs, and that   the samples between the unique IDs of the experimental target gene and reference gene match. 
+    #View(NF62_x2207_Sub_delta.df) 
+  
+  #Renaming variables for clarity
+  NF62_x2207_Sub_delta.df<- NF62_x2207_Sub_delta.df %>%
+    dplyr::rename("targetEfficiency" = "E.x",
+           "targetExponentIndividual" = "Exponents.x",
+           "referenceEfficiency" = "E.y",
+           "referenceExponentIndividual" = "Exponents.y")
+
+#NF66
+  NF66_x2207_Sub_ExperimentalGenes.df <- x2207_FoldC.NF66 %>%
+    filter(Target_Name == "FABP1" | Target_Name == "ACOX1" | Target_Name == "APOA5" | Target_Name == "PCK1")
+  #View(x2207_Sub_ExperimentalGenes.df)
+  
+  NF66_x2207_Sub_ReferenceGene.df <- x2207_FoldC.NF66 %>%
+    filter(Target_Name == "SUB1") %>%
+    dplyr::rename("ref_Ct_Mean" = "Ct_Mean")
+  #View(x2207_Sub_ReferenceGene.df)
+  
+  NF66_x2207_Sub_delta.df <- left_join(NF66_x2207_Sub_ExperimentalGenes.df, NF66_x2207_Sub_ReferenceGene.df, by = c("Sample_Name", "Tech_Rep"))      
+  #Check that these joined in the manner I wanted them too by checking the sample name matches both unique IDs, and that     the samples between the unique IDs of the experimental target gene and reference gene match. 
+    #View(NF66_x2207_Sub_delta.df) 
+  
+  #Renaming variables for clarity
+  NF66_x2207_Sub_delta.df<- NF66_x2207_Sub_delta.df %>%
+    dplyr::rename("targetEfficiency" = "E.x",
+           "targetExponentIndividual" = "Exponents.x",
+           "referenceEfficiency" = "E.y",
+           "referenceExponentIndividual" = "Exponents.y")
+
+```
+
+## Calculating Fold Change for NF Stage 
+```{r 7 chunk Fold Change, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Performing the following Pfaffl calculation.. FoldC = geneEfficiencyOverall^(Exponent of gene for individual) / referenceEfficiencyOverall^(Exponent of reference gene for individual)
+
+    #QA/QC note, this script to calculate fold change was cross-referenced to a internal lab excel file used for previous publications (special thanks to Dr. Elizabeth Allmon) with Cyprinodon variegatus to ensure fold change calculations matched for a subset of this data as a quality benchmark for this workflow. The development of this script was done to support the reproducibility and transparency of the analyses for this study.
+
+
+#NF58
+  NF58_x2207_FoldC.calculated.df <- NF58_x2207_Sub_delta.df %>%
+    mutate(FoldC = ((targetEfficiency^(targetExponentIndividual)) / (referenceEfficiency^(referenceExponentIndividual))))
+  #View(NF58_x2207_FoldC.calculated.df) 
+
+#NF62
+  NF62_x2207_FoldC.calculated.df <- NF62_x2207_Sub_delta.df %>%
+    mutate(FoldC = ((targetEfficiency^(targetExponentIndividual)) / (referenceEfficiency^(referenceExponentIndividual))))
+  #View(NF62_x2207_FoldC.calculated.df) 
+  
+#NF66
+  NF66_x2207_FoldC.calculated.df <- NF66_x2207_Sub_delta.df %>%
+    mutate(FoldC = ((targetEfficiency^(targetExponentIndividual)) / (referenceEfficiency^(referenceExponentIndividual)))) 
+  #View(NF66_x2207_FoldC.calculated.df)
+
+```
+
+## Streamlining dataframe for statistical analysis & graphing for each NF Stage
+```{r 8 chunk removing duplicates, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#However, since we still have the raw Ct values in there for each technical duplicate, we will need to streamline this dataframe to exclude raw Ct data and technical rep information, so each unique ID is represented once to not artificially inflate the statistical power when conducting analyses. Plus, this dataframe will make it clear to graph the Ct_Mean values and the FoldC, essentially not having duplicate points. 
+
+#NF58
+  NF58_x2207_FoldC.calculated.stream <- NF58_x2207_FoldC.calculated.df %>%
+    distinct(Unique_Sam_Gene_PlateMap.x, .keep_all= TRUE)
+  #View(x2207_FoldC.calculated.stream)
+  
+  #subsetting a dataframe that excludes NTC, NRT, IP Control
+  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- NF58_x2207_FoldC.calculated.stream %>%
+    filter(Treatment.x.x.x == 'Control' | Treatment.x.x.x == 'MIX' | Treatment.x.x.x == 'PFOS'| Treatment.x.x.x == 'PFHxS'| Treatment.x.x.x == 'PFOA'| Treatment.x.x.x == 'PFHxA')
+  #View(NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly) 
+  
+#NF62
+  NF62_x2207_FoldC.calculated.stream <- NF62_x2207_FoldC.calculated.df %>%
+    distinct(Unique_Sam_Gene_PlateMap.x, .keep_all= TRUE)
+  #View(x2207_FoldC.calculated.stream)
+  
+  #subsetting a dataframe that excludes NTC, NRT, IP Control
+  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- NF62_x2207_FoldC.calculated.stream %>%
+    filter(Treatment.x.x.x == 'Control' | Treatment.x.x.x == 'MIX' | Treatment.x.x.x == 'PFOS'| Treatment.x.x.x == 'PFHxS'| Treatment.x.x.x == 'PFOA'| Treatment.x.x.x == 'PFHxA')
+  #View(NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly) 
+
+#NF66
+  NF66_x2207_FoldC.calculated.stream <- NF66_x2207_FoldC.calculated.df %>%
+    distinct(Unique_Sam_Gene_PlateMap.x, .keep_all= TRUE)
+  #View(x2207_FoldC.calculated.stream)
+  
+  #subsetting a dataframe that excludes NTC, NRT, IP Control
+  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- NF66_x2207_FoldC.calculated.stream %>%
+    filter(Treatment.x.x.x == 'Control' | Treatment.x.x.x == 'MIX' | Treatment.x.x.x == 'PFOS'| Treatment.x.x.x == 'PFHxS'| Treatment.x.x.x == 'PFOA'| Treatment.x.x.x == 'PFHxA')
+  #View(NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly) 
+
+```
+
+# Preparation for NF58 Visualizing
+## Outlier exclusion for Fold Change by Treatments
+```{r 9 chunk visual prep NF58 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Checking for outliers, NF 58
+#Creating manual Fold C upper and lower bounds for outliers detection based on a 3xIQR rule
+NF58.summary.stats.FoldC <- NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>% 
+  dplyr::summarize(q1 = quantile(FoldC, 0.25, na.rm=TRUE),
+            mean = mean(FoldC),
+            q3 = quantile(FoldC, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upperFoldC = (q3 + ((3)*IQR))) %>%
+  mutate(lowerFoldC = (q1 - ((3)*IQR))) %>%
+  dplyr::select(Treatment.x.x.x, Target_Name.x, upperFoldC, lowerFoldC)
+
+NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- left_join(NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly, NF58.summary.stats.FoldC, by=c("Treatment.x.x.x", "Target_Name.x" )) #joining to add in upper and lower bounds for outliers detection
+
+NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO <- NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  filter(FoldC < upperFoldC, FoldC > lowerFoldC) #checked via str before and after, and appears to have dropped observations outside this range
+
+    #print(NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+    #       group_by(Treatment.x.x.x, Target_Name.x) %>%
+    #       summarize(Freq=n()), n=21)
+
+#Removing Control group for visualization purpose as will be replacing with an h-line for reference point
+
+#Renaming dataframe for ease reading during coding figures and ensuring levels are ordered appropriately for figures
+NF58_visualizingFoldC.df <- NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO 
+NF58_visualizingFoldC.df$Treatment.x.x.x <- factor(NF58_visualizingFoldC.df$Treatment.x.x.x, levels = c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"))
+
+```
+
+## Normalizing Fold Change to average Fold Change of Control group for each gene
+```{r 10 chunk visual prep NF58 FC graph normalize, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Do what you did for calculating treatment Ct but for fold change now
+
+#Calculating average Fold Change by Treatment for NF 58
+NF58_visualizingFoldC.df.test <- NF58_visualizingFoldC.df %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  dplyr::mutate(FoldC_TreatmentMean = mean(FoldC, na.rm=TRUE))
+
+#Subset controls only and ammend to dataframe --> #Creating DF of Control treatment Ct mean by target
+#NF58
+  NF58_visualizingFoldC.df.test.Control <- NF58_visualizingFoldC.df.test %>%
+    filter(Treatment.x.x.x == "Control") %>%
+    select(FoldC_TreatmentMean) %>%
+    dplyr::rename("FoldC_ControlTreatmentMean" = "FoldC_TreatmentMean") %>%
+    distinct(Target_Name.x, FoldC_ControlTreatmentMean)
+  #str(NF58_visualizingFoldC.df.test.Control)
+  
+#Joining data frames to normalize fold change to control for each treatment
+  #NF66
+  NF58_visualizingFoldC.df.join <- left_join(NF58_visualizingFoldC.df.test, NF58_visualizingFoldC.df.test.Control, by = "Target_Name.x", multiple = "all")
+  #View(x2207_FoldC.NF66)
+
+#Now I have a column FoldC_ControlTreatmentMean that has the average fold change of the control group for each gene, so that each gene can be normalized to the control group
+
+ NF58_visualizingnormFoldC.df <- NF58_visualizingFoldC.df.join %>%
+ mutate(normFoldC = FoldC / FoldC_ControlTreatmentMean)
+
+```
+
+# NF58 Visualization
+
+## NF58 ACOX1
+
+```{r 11 chunk ACOX1 NF58 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#ACOX1
+NF58_x2207_normFoldC.ACOX <- NF58_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "ACOX1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    ACOX.x2207.FoldCvsTreatment.NF58 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF58_x2207_normFoldC.ACOX) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    ACOX.x2207.FoldCvsTreatment_means.NF58 <- emmeans(ACOX.x2207.FoldCvsTreatment.NF58, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    ACOX.x2207.FoldCvsTreatment_means_dataframe.NF58 <- data.frame(ACOX.x2207.FoldCvsTreatment_means.NF58) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("acox1"), "(NF 58)")) #title for ggplot
+
+NF58_x2207_normFoldC_means.ACOX <- ggplot(data=ACOX.x2207.FoldCvsTreatment.NF58, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = ACOX.x2207.FoldCvsTreatment_means_dataframe.NF58, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), ACOX.x2207.FoldCvsTreatment_means_dataframe.NF58, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 7, 1), limits = c(-1, 7)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF58_x2207_normFoldC_means.ACOX
+```
+
+## NF58 APOA5
+
+```{r 12 chunk APOA5 NF58 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+NF58_x2207_normFoldC.APOA <- NF58_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "APOA5")
+
+#Creating DF for Visualizing APOA1 across Developmental Stages
+    APOA.x2207.normFoldCvsTreatment.NF58 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF58_x2207_normFoldC.APOA) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    APOA.x2207.normFoldCvsTreatment_means.NF58 <- emmeans(APOA.x2207.normFoldCvsTreatment.NF58, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    APOA.x2207.normFoldCvsTreatment_means_dataframe.NF58 <- data.frame(APOA.x2207.normFoldCvsTreatment_means.NF58) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("apoa5"), "(NF 58)")) #title for ggplot
+
+NF58_x2207_normFoldC_means.APOA <- ggplot(data=APOA.x2207.normFoldCvsTreatment.NF58, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = APOA.x2207.normFoldCvsTreatment_means_dataframe.NF58, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), APOA.x2207.normFoldCvsTreatment_means_dataframe.NF58, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 7, 1), limits = c(-1, 7)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"))+
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF58_x2207_normFoldC_means.APOA
+
+```
+
+
+## NF58 FABP1
+
+```{r 13 chunk FABP1 NF58 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+NF58_x2207_normFoldC.FABP <- NF58_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "FABP1")
+
+#Creating DF for Visualizing FABP1 across Developmental Stages
+    FABP.x2207.normFoldCvsTreatment.NF58 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF58_x2207_normFoldC.FABP) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    FABP.x2207.normFoldCvsTreatment_means.NF58 <- emmeans(FABP.x2207.normFoldCvsTreatment.NF58, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    FABP.x2207.normFoldCvsTreatment_means_dataframe.NF58 <- data.frame(FABP.x2207.normFoldCvsTreatment_means.NF58) #we associate those means to a dataframe object that we will use to run the ggplot
+    
+my_title <- expression(paste(italic("fabp1"), "(NF 58)")) #title for ggplot
+
+NF58_x2207_normFoldC_means.FABP <- ggplot(data=FABP.x2207.normFoldCvsTreatment.NF58, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = FABP.x2207.normFoldCvsTreatment_means_dataframe.NF58, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), FABP.x2207.normFoldCvsTreatment_means_dataframe.NF58, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 7, 1), limits = c(-1, 7)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF58_x2207_normFoldC_means.FABP
+```
+
+
+## NF58 PCK1
+
+```{r 14 chunk PCK1 NF58 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+NF58_x2207_normFoldC.PCK <- NF58_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "PCK1")
+
+#Creating DF for Visualizing PCK1 across Developmental Stages
+    PCK.x2207.normFoldCvsTreatment.NF58 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF58_x2207_normFoldC.PCK) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    PCK.x2207.normFoldCvsTreatment_means.NF58 <- emmeans(PCK.x2207.normFoldCvsTreatment.NF58, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    PCK.x2207.normFoldCvsTreatment_means_dataframe.NF58 <- data.frame(PCK.x2207.normFoldCvsTreatment_means.NF58) #we associate those means to a dataframe object that we will use to run the ggplot
+    
+my_title <- expression(paste(italic("pck1"), "(NF 58)")) #title for ggplot
+
+NF58_x2207_normFoldC_means.PCK <- ggplot(data=PCK.x2207.normFoldCvsTreatment.NF58, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = PCK.x2207.normFoldCvsTreatment_means_dataframe.NF58, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), PCK.x2207.normFoldCvsTreatment_means_dataframe.NF58, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 7, 1), limits = c(-1, 7)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF58_x2207_normFoldC_means.PCK
+```
+```{r 15 chunk ggarrange NF58, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+NF58_normFoldC_plots <- ggarrange(NF58_x2207_normFoldC_means.ACOX, NF58_x2207_normFoldC_means.APOA, NF58_x2207_normFoldC_means.FABP, NF58_x2207_normFoldC_means.PCK, ncol = 2, nrow = 2)
+NF58_normFoldC_plots
+```
+
+# NF58 ANOVAs
+
+Note, when analyzing NF58 by Sex, there are two individuals without a genetic sex, Mix 6 (lost the whole body sample), and PFOS 36 (failed genetic sexing sample twice). So, need to exclude these individuals when analyzing using Sex for NF58.
+
+## NF58 Factorial ANOVA of FC for ACOX1 with Sex
+```{r 16 chunk NF58, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+
+#initial dataframe
+NF58_x2207_FoldC_stat.acox <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  filter(Individual_ID.x != "MIX 6" & Individual_ID.x != "PFOS 36") %>%
+  mutate(Ln_FoldC = log(FoldC)) 
+
+#Taking the time to check  if there is a difference using the scaled dataframe, which I don't think there should be... doesn't seem like, so let's test it to compare and then run on the standard to compare differences
+NF58_visualizingnormFoldC.nCalcACOX <- NF58_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  filter(Individual_ID.x != "MIX 6" & Individual_ID.x != "PFOS 36") %>%
+  mutate(Ln_normFoldC = log(normFoldC)) 
+
+
+##Step 2 -- exploring data
+#SCALED
+leveneTest(NF58_visualizingnormFoldC.nCalcACOX$Ln_normFoldC, NF58_visualizingnormFoldC.nCalcACOX$Treatment.x.x.x.x, center=median)
+
+#OG
+leveneTest(NF58_x2207_FoldC_stat.acox$Ln_FoldC, NF58_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+
+#SCALED
+NF58_visualizingnormFoldC.nCalcACOX$Sex.x <- as.factor(NF58_visualizingnormFoldC.nCalcACOX$Sex.x) 
+NF58_visualizingnormFoldC.nCalcACOX$Block.x <- as.factor(NF58_visualizingnormFoldC.nCalcACOX$Block.x) 
+NF58_visualizingnormFoldC.nCalcACOX$Treatment.x.x.x.x <- as.factor(NF58_visualizingnormFoldC.nCalcACOX$Treatment.x.x.x.x) 
+
+#OG
+NF58_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF58_x2207_FoldC_stat.acox$Sex.x) 
+NF58_x2207_FoldC_stat.acox$Block.x <- as.factor(NF58_x2207_FoldC_stat.acox$Block.x) 
+NF58_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.acox$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+
+#SCALED
+  x2207.ANOVA.FoldC.car.acox.S <- aov(Ln_normFoldC ~ Block.x + Sex.x*Treatment.x.x.x.x, data =NF58_visualizingnormFoldC.nCalcACOX)
+   x2207.III.ANOVA.FoldC.acox.S <- Anova(x2207.ANOVA.FoldC.car.acox.S, type = 3) 
+   #FLAG, model singularity from inclusion of sex
+   x2207.III.ANOVA.FoldC.acox.S 
+    summary(x2207.ANOVA.FoldC.car.acox.S)
+    plot(x2207.ANOVA.FoldC.car.acox.S) #assessing assumptions using plots of residuals and QQ-plot. 
+
+
+#OG
+  x2207.ANOVA.FoldC.car.acox.OG <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF58_x2207_FoldC_stat.acox)
+   x2207.III.ANOVA.FoldC.acox.OG <- Anova(x2207.ANOVA.FoldC.car.acox.OG, type = 3) #FLAG, model singularity from inclusion of sex
+   x2207.III.ANOVA.FoldC.acox.OG 
+    summary(x2207.ANOVA.FoldC.car.acox.OG)
+    plot(x2207.ANOVA.FoldC.car.acox.OG) #assessing assumptions using plots of residuals and QQ-plot. 
+
+
+##Step 5 -- Compute contrasts or post-hoc tests 
+ 
+#SCALED 
+    #Not necessary
+ 
+#OG
+    #Not necessary
+
+#CONCLUSION, IDENTICAL ESTIMATES USING RESCALED OR NOT, so will just use the not-rescaled for ease
+
+ 
+  print(NF58_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF58 ANOVA Table for aov(acoxLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 17 chunk ANOVA acox Ln_FoldC table, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox.OG) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox.OG) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox.OG, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for ACOX1 
+(not excluding PFOS 36 & Mix 6)
+```{r 18 chunk NF58 no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+
+#initial dataframe
+NF58_x2207_FoldC_stat.acox <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  mutate(Ln_FoldC = log(FoldC)) 
+
+##Step 2 -- exploring data
+
+leveneTest(NF58_x2207_FoldC_stat.acox$Ln_FoldC, NF58_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF58_x2207_FoldC_stat.acox$Sex.x) 
+NF58_x2207_FoldC_stat.acox$Block.x <- as.factor(NF58_x2207_FoldC_stat.acox$Block.x) 
+NF58_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.acox$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF58_x2207_FoldC_stat.acox)
+  x2207.III.ANOVA.FoldC.acox <- Anova(x2207.ANOVA.FoldC.car.acox, type = 3) 
+  x2207.III.ANOVA.FoldC.acox 
+  summary(x2207.ANOVA.FoldC.car.acox)
+  plot(x2207.ANOVA.FoldC.car.acox) #assessing assumptions using plots of residuals and QQ-plot. 
+
+
+##Step 5 -- Compute contrasts or post-hoc tests 
+    #Not necessary
+ 
+  print(NF58_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF58 ANOVA Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 19 chunk ANOVA acox Ln_FoldC table, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for APOA5 with Sex
+```{r 20 chunk apoa FoldC apoa NF stage sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.apoa <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  filter(Individual_ID.x != "MIX 6" & Individual_ID.x != "PFOS 36") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.apoa$Ln_FoldC, NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions. Close though, i.e. p < 0.1
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Sex.x) 
+NF58_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Block.x) 
+NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF58_x2207_FoldC_stat.apoa)
+   x2207.III.ANOVA.FoldC.apoa.sex <- Anova(x2207.ANOVA.FoldC.car.apoa.sex, type = 3) #FLAG, model singularity from inclusion of sex
+   x2207.III.ANOVA.FoldC.apoa.sex
+    summary(x2207.ANOVA.FoldC.car.apoa.sex)
+    plot(x2207.ANOVA.FoldC.car.apoa.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+ 
+ print(NF58_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF58 ANOVA Table for aov(apoaLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 21 chunk apoa anova table FoldC sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa.sex, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for APOA5 
+(not excluding PFOS 36 & Mix 6)
+```{r 22 chunk apoa FoldC apoa NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.apoa <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.apoa$Ln_FoldC, NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions. Close though, i.e. p < 0.1
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Sex.x)
+NF58_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Block.x)
+NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.apoa$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF58_x2207_FoldC_stat.apoa)
+  x2207.III.ANOVA.FoldC.apoa <- Anova(x2207.ANOVA.FoldC.car.apoa, type = 3) 
+  x2207.III.ANOVA.FoldC.apoa
+  summary(x2207.ANOVA.FoldC.car.apoa)
+  plot(x2207.ANOVA.FoldC.car.apoa) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+ 
+ print(NF58_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF58 ANOVA Table for aov(apoaLn_FoldC ~ Block + Treatment), Type III
+```{r 23 chunk apoa anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for FABP1 with Sex
+```{r 24 chunk fabp FoldC fabp NF stage sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.fabp <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+    filter(Individual_ID.x != "MIX 6" & Individual_ID.x != "PFOS 36") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.fabp$Ln_FoldC, NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Sex.x) 
+NF58_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Block.x) 
+NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF58_x2207_FoldC_stat.fabp)
+   x2207.III.ANOVA.FoldC.fabp.sex <- Anova(x2207.ANOVA.FoldC.car.fabp.sex, type = 3) #FLAG, model singularity from inclusion of sex
+   x2207.III.ANOVA.FoldC.fabp.sex 
+    summary(x2207.ANOVA.FoldC.car.fabp.sex)
+    plot(x2207.ANOVA.FoldC.car.fabp.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+ 
+ print(NF58_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF58 ANOVA Table for aov(fabpLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 25 chunk fabp anova table FoldC sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp.sex, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for FABP1 
+(not excluding PFOS 36 & Mix 6)
+```{r 26 fabp FoldC fabp NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.fabp <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.fabp$Ln_FoldC, NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) 
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Sex.x)
+NF58_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Block.x)
+NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.fabp$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF58_x2207_FoldC_stat.fabp)
+   x2207.III.ANOVA.FoldC.fabp <- Anova(x2207.ANOVA.FoldC.car.fabp, type = 3) 
+   x2207.III.ANOVA.FoldC.fabp 
+    summary(x2207.ANOVA.FoldC.car.fabp)
+    plot(x2207.ANOVA.FoldC.car.fabp) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+ 
+ print(NF58_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF58 ANOVA Table for aov(fabpLn_FoldC ~ Block + Treatment), Type III
+```{r 27 fabp anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for PCK1 with Sex
+```{r 28 chunk pck FoldC pck NF stage, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.pck <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+    filter(Individual_ID.x != "MIX 6" & Individual_ID.x != "PFOS 36") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.pck$Ln_FoldC, NF58_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF58_x2207_FoldC_stat.pck$Sex.x) 
+NF58_x2207_FoldC_stat.pck$Block.x <- as.factor(NF58_x2207_FoldC_stat.pck$Block.x) 
+NF58_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.pck$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF58_x2207_FoldC_stat.pck)
+   x2207.III.ANOVA.FoldC.pck.sex <- Anova(x2207.ANOVA.FoldC.car.pck.sex, type = 3) #FLAG, model singularity from inclusion of sex
+   x2207.III.ANOVA.FoldC.pck.sex 
+    summary(x2207.ANOVA.FoldC.car.pck.sex)
+    plot(x2207.ANOVA.FoldC.car.pck.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+  
+ print(NF58_x2207_FoldC_stat.pck %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF58 ANOVA Table for aov(pckLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 29 chunk pck anova table FoldC, echo=FALSE}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck.sex, digits = 3)
+```
+## NF58 Factorial ANOVA of FC for PCK1
+(not excluding PFOS 36 & Mix 6)
+```{r 30 chunk pck FoldC pck NF stage no sex, echo=FALSE}
+##Step1 — enter data
+NF58_x2207_FoldC_stat.pck <-  NF58_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF58_x2207_FoldC_stat.pck$Ln_FoldC, NF58_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF58_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF58_x2207_FoldC_stat.pck$Sex.x)
+NF58_x2207_FoldC_stat.pck$Block.x <- as.factor(NF58_x2207_FoldC_stat.pck$Block.x)
+NF58_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF58_x2207_FoldC_stat.pck$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF58_x2207_FoldC_stat.pck)
+  x2207.III.ANOVA.FoldC.pck <- Anova(x2207.ANOVA.FoldC.car.pck, type = 3)
+  x2207.III.ANOVA.FoldC.pck
+  summary(x2207.ANOVA.FoldC.car.pck)
+  plot(x2207.ANOVA.FoldC.car.pck) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ postHocs <- glht(x2207.ANOVA.FoldC.car.pck, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+ summary(postHocs) #this Dunnett shows that nothing is significant
+
+  
+ print(NF58_x2207_FoldC_stat.pck %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF58 ANOVA Table for aov(pckLn_FoldC ~ Block + Treatment), Type III
+```{r 31 pck anova table FoldC no sex, echo=FALSE}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck, digits = 3)
+```
+
+
+# Preparation for NF62 Visualizing
+
+## Outlier exclusion for Fold Change by Treatments
+```{r 32 chunk visual prep NF62 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Checking for outliers, NF62
+#Creating manual Fold C upper and lower bounds for outliers detection based on a 3xIQR rule
+NF62.summary.stats.FoldC <- NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  dplyr::group_by(Target_Name.x, Treatment.x.x.x) %>% 
+  dplyr::summarize(q1 = quantile(FoldC, 0.25, na.rm=TRUE),
+            mean = mean(FoldC),
+            q3 = quantile(FoldC, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upperFoldC = (q3 + ((3)*IQR))) %>%
+  mutate(lowerFoldC = (q1 - ((3)*IQR))) %>%
+ dplyr::select(Treatment.x.x.x, Target_Name.x, upperFoldC, lowerFoldC)
+
+NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- left_join(NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly, NF62.summary.stats.FoldC, by=c("Treatment.x.x.x", "Target_Name.x" )) #joining to add in upper and lower bounds for outliers detection
+
+NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO <- NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  filter(FoldC < upperFoldC, FoldC > lowerFoldC) #checked via str before and after, and appears to have dropped observations outside this range
+
+#print(NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+#        group_by(Treatment.x.x.x, Target_Name.x) %>%
+ #       summarize(Freq=n()), n=21)
+
+#Removing Control group for visualization purpose as will be replacing with an h-line for reference point
+
+#Renaming dataframe for ease reading during coding figures and ensuring levels are ordered appropriately for figures
+NF62_visualizingFoldC.df <- NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO 
+NF62_visualizingFoldC.df$Treatment.x.x.x <- factor(NF62_visualizingFoldC.df$Treatment.x.x.x, levels = c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"))
+
+```
+
+## Normalizing Fold Change to average Fold Change of Control group for each gene
+```{r 33 visual prep NF62 FC graph normalize, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Rescaling treatments to control for visualization for more intuitive interpretation; Doing so will ensure control with an mean FC = 1 and other treatments can then more easily interpreted relative to the control
+
+#Calculating average Fold Change by Treatment for NF 62
+NF62_visualizingFoldC.df.test <- NF62_visualizingFoldC.df %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  dplyr::mutate(FoldC_TreatmentMean = mean(FoldC, na.rm=TRUE))
+
+#Subset controls only and ammend to dataframe --> #Creating DF of Control treatment Ct mean by target
+#NF62
+  NF62_visualizingFoldC.df.test.Control <- NF62_visualizingFoldC.df.test %>%
+    filter(Treatment.x.x.x == "Control") %>%
+    select(FoldC_TreatmentMean) %>%
+    dplyr::rename("FoldC_ControlTreatmentMean" = "FoldC_TreatmentMean") %>%
+    distinct(Target_Name.x, FoldC_ControlTreatmentMean)
+  #str(NF62_visualizingFoldC.df.test.Control)
+  
+#Joining data frames to normalize fold change to control for each treatment
+  #NF66
+  NF62_visualizingFoldC.df.join <- left_join(NF62_visualizingFoldC.df.test, NF62_visualizingFoldC.df.test.Control, by = "Target_Name.x", multiple = "all")
+  #View(x2207_FoldC.NF66)
+
+#Now I have a column FoldC_ControlTreatmentMean that has the average fold change of the control group for each gene, so that each gene can be normalized to the control group
+
+ NF62_visualizingnormFoldC.df <- NF62_visualizingFoldC.df.join %>%
+ mutate(normFoldC = FoldC / FoldC_ControlTreatmentMean)
+
+```
+
+# NF62 Visualization
+
+## NF62 ACOX1
+
+```{r 34 ACOX1 NF62 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#ACOX1
+NF62_x2207_normFoldC.ACOX <- NF62_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "ACOX1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    ACOX.x2207.FoldCvsTreatment.NF62 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF62_x2207_normFoldC.ACOX) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    ACOX.x2207.FoldCvsTreatment_means.NF62 <- emmeans(ACOX.x2207.FoldCvsTreatment.NF62, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    ACOX.x2207.FoldCvsTreatment_means_dataframe.NF62 <- data.frame(ACOX.x2207.FoldCvsTreatment_means.NF62) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("acox1"), "(NF 62)")) #title for ggplot
+
+NF62_x2207_normFoldC_means.ACOX <- ggplot(data=ACOX.x2207.FoldCvsTreatment.NF62, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = ACOX.x2207.FoldCvsTreatment_means_dataframe.NF62, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), ACOX.x2207.FoldCvsTreatment_means_dataframe.NF62, width = 0.2, position = position_dodge(width = 0.7)) +
+ scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF62_x2207_normFoldC_means.ACOX
+```
+
+## NF62 APOA5
+
+```{r 35 APOA5 NF62 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#APOA5
+NF62_x2207_normFoldC.APOA <- NF62_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "APOA5")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    APOA.x2207.FoldCvsTreatment.NF62 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF62_x2207_normFoldC.APOA) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    APOA.x2207.FoldCvsTreatment_means.NF62 <- emmeans(APOA.x2207.FoldCvsTreatment.NF62, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    APOA.x2207.FoldCvsTreatment_means_dataframe.NF62 <- data.frame(APOA.x2207.FoldCvsTreatment_means.NF62) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("apoa5"), "(NF 62)")) #title for ggplot
+
+NF62_x2207_normFoldC_means.APOA <- ggplot(data=APOA.x2207.FoldCvsTreatment.NF62, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = APOA.x2207.FoldCvsTreatment_means_dataframe.NF62, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), APOA.x2207.FoldCvsTreatment_means_dataframe.NF62, width = 0.2, position = position_dodge(width = 0.7)) +
+   scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF62_x2207_normFoldC_means.APOA
+```
+
+## NF62 FABP1
+
+```{r 36 FABP1 NF62 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#FABP1
+NF62_x2207_normFoldC.FABP <- NF62_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "FABP1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    FABP.x2207.FoldCvsTreatment.NF62 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF62_x2207_normFoldC.FABP) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    FABP.x2207.FoldCvsTreatment_means.NF62 <- emmeans(FABP.x2207.FoldCvsTreatment.NF62, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    FABP.x2207.FoldCvsTreatment_means_dataframe.NF62 <- data.frame(FABP.x2207.FoldCvsTreatment_means.NF62) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("fabp1"), "(NF 62)")) #title for ggplot
+
+NF62_x2207_normFoldC_means.FABP <- ggplot(data=FABP.x2207.FoldCvsTreatment.NF62, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = FABP.x2207.FoldCvsTreatment_means_dataframe.NF62, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), FABP.x2207.FoldCvsTreatment_means_dataframe.NF62, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF62_x2207_normFoldC_means.FABP
+```
+
+## NF62 PCK1
+
+```{r 37 PCK1 NF62 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#PCK1
+NF62_x2207_normFoldC.PCK <- NF62_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "PCK1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    PCK.x2207.FoldCvsTreatment.NF62 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF62_x2207_normFoldC.PCK) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    PCK.x2207.FoldCvsTreatment_means.NF62 <- emmeans(PCK.x2207.FoldCvsTreatment.NF62, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    PCK.x2207.FoldCvsTreatment_means_dataframe.NF62 <- data.frame(PCK.x2207.FoldCvsTreatment_means.NF62) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("pck1"), "(NF 62)")) #title for ggplot
+
+NF62_x2207_normFoldC_means.PCK <- ggplot(data=PCK.x2207.FoldCvsTreatment.NF62, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = PCK.x2207.FoldCvsTreatment_means_dataframe.NF62, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), PCK.x2207.FoldCvsTreatment_means_dataframe.NF62, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_break(c(10, 15)) + 
+  scale_y_continuous(breaks = seq(0, 18, 2), limits = c(-2, 18)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16), 
+        axis.ticks.y.right = element_blank(),
+        axis.text.y.right = element_blank(),
+        axis.line.y.right = element_blank())
+NF62_x2207_normFoldC_means.PCK
+```
+```{r 38 chunk ggarrange NF62, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+NF62_normFoldC_plots <- ggarrange(NF62_x2207_normFoldC_means.ACOX, NF62_x2207_normFoldC_means.APOA, NF62_x2207_normFoldC_means.FABP, NF62_x2207_normFoldC_means.PCK, ncol = 2, nrow = 2)
+NF62_normFoldC_plots
+```
+
+# NF62 ANOVAs
+
+## NF62 Factorial ANOVA of FC for ACOX1 with Sex
+```{r 24 NF62 FoldC ACOX NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.acox <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.acox$Ln_FoldC, NF62_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF62_x2207_FoldC_stat.acox$Sex.x) 
+NF62_x2207_FoldC_stat.acox$Block.x <- as.factor(NF62_x2207_FoldC_stat.acox$Block.x) 
+NF62_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.acox$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF62_x2207_FoldC_stat.acox)
+  x2207.III.ANOVA.FoldC.acox.sex <- Anova(x2207.ANOVA.FoldC.car.acox.sex, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.acox.sex 
+  summary(x2207.ANOVA.FoldC.car.acox.sex)
+  plot(x2207.ANOVA.FoldC.car.acox.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+    print(NF62_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, NF_Stage.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+    
+    
+##Checking for heterosk issue potentially with point 12 
+    NF62_x2207_FoldC_stat.acox.N12 <- NF62_x2207_FoldC_stat.acox[-c(12), ]
+  
+    leveneTest(NF62_x2207_FoldC_stat.acox.N12$Ln_FoldC, group = NF62_x2207_FoldC_stat.acox.N12$Treatment.x.x.x, center=median) #non-significant
+    NF62_x2207_FoldC_stat.acox.N12$Sex.x <- as.factor(NF62_x2207_FoldC_stat.acox.N12$Sex.x) 
+    NF62_x2207_FoldC_stat.acox.N12$Block.x <- as.factor(NF62_x2207_FoldC_stat.acox.N12$Block.x)
+    NF62_x2207_FoldC_stat.acox.N12$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.acox.N12$Treatment.x.x.x)
+ 
+    x2207.ANOVA.FoldC.car.acox.HI <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF62_x2207_FoldC_stat.acox.N12)
+   x2207.III.ANOVA.FoldC.acox.HI <- Anova(x2207.ANOVA.FoldC.car.acox.HI, type = 3) #FLAG, could not include sex in the model due to a singularity
+    x2207.III.ANOVA.FoldC.acox.HI 
+    summary(x2207.ANOVA.FoldC.car.acox.HI)
+    plot(x2207.ANOVA.FoldC.car.acox.HI)
+  
+  #Conclusion, removing did not change outcome of anova. Retain datapoint 12.
+ 
+```
+## NF62 ANOVA Table for aov(acoxLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 40 acox 62 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox.sex, digits = 3)
+```
+## NF62 Factorial ANOVA of FC for ACOX1 
+```{r 41 chunk NF62 FoldC ACOX NF no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.acox <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.acox$Ln_FoldC, NF62_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF62_x2207_FoldC_stat.acox$Sex.x) 
+NF62_x2207_FoldC_stat.acox$Block.x <- as.factor(NF62_x2207_FoldC_stat.acox$Block.x) 
+NF62_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.acox$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF62_x2207_FoldC_stat.acox)
+  x2207.III.ANOVA.FoldC.acox <- Anova(x2207.ANOVA.FoldC.car.acox, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.acox
+  summary(x2207.ANOVA.FoldC.car.acox)
+  plot(x2207.ANOVA.FoldC.car.acox) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+   #Not necessary
+    
+    print(NF62_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF62 ANOVA Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 42 chunk acox 62 anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox, digits = 3)
+```
+
+## NF62 Factorial ANOVA of FC for APOA5 with Sex
+Note, without sex, there was a trend of PFHxA & PFOA being downregulated, but when sex included, signal captured for PFHxA and not PFOA (the latter has lower # males)
+```{r 43 chunk NF62 apoa FoldC apoa NF stage, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.apoa <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.apoa$Ln_FoldC, NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Sex.x) 
+NF62_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Block.x) 
+NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF62_x2207_FoldC_stat.apoa)
+  x2207.III.ANOVA.FoldC.apoa.sex <- Anova(x2207.ANOVA.FoldC.car.apoa.sex, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.apoa.sex 
+  summary(x2207.ANOVA.FoldC.car.apoa.sex)
+  plot(x2207.ANOVA.FoldC.car.apoa.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests
+  postHocs.apoa <- glht(x2207.ANOVA.FoldC.car.apoa.sex, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+  summary(postHocs.apoa) #this Dunnett shows a significant decrease for PFHxA when accounting for sex, and weak evidence for PFOA
+
+ 
+   print(NF62_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF62 ANOVA Table for aov(apoaLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 44 chunk apoa 62 anova table FoldC sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa.sex, digits = 3)
+```
+## NF62 Post-hoc Table for aov(apoaLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 45 chunk dunnet apoa post hoc table set up, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.apoa)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.apoa))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("MIX-Control","PFHxA-Control","PFHxS-Control", "PFOA-Control", "PFOS-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 46 chunk apoa post hoc table 2, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.apoa <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.apoa
+
+```
+
+## NF62 Factorial ANOVA of FC for APOA5
+ote, without sex, there was a trend of PFHxA & PFOA being downregulated, but no signal
+```{r 26 NF62 apoa FoldC apoa NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.apoa <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.apoa$Ln_FoldC, NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Sex.x) 
+NF62_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Block.x) 
+NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.apoa$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF62_x2207_FoldC_stat.apoa)
+  x2207.III.ANOVA.FoldC.apoa <- Anova(x2207.ANOVA.FoldC.car.apoa, type = 3) 
+  x2207.III.ANOVA.FoldC.apoa 
+  summary(x2207.ANOVA.FoldC.car.apoa)
+  plot(x2207.ANOVA.FoldC.car.apoa) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs.apoa.nosex <- glht(x2207.ANOVA.FoldC.car.apoa, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+  summary(postHocs.apoa.nosex) #this Dunnett shows that there is weak evidence (p < 0.1) for decrease in PFHxA and PFOA, and it is not statistically significant
+ 
+ 
+   print(NF62_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+    
+```
+## NF62 ANOVA Table for aov(apoaLn_FoldC ~ Block + Treatment), Type III
+```{r 48 chunk apoa 62 anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa, digits = 3)
+```
+
+## NF62 Post-hoc Table for aov(apoaLn_FoldC ~ Block + Treatment), Type III
+```{r 49 chunk dunnet apoa post hoc table set up no sex, echo=FALSE, include=FALSE, warning=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.apoa.nosex)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.apoa.nosex))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("MIX-Control","PFHxA-Control","PFHxS-Control", "PFOA-Control", "PFOS-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 50 chunk apoa post hoc table 3 no sex, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.apoa.nosex <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.apoa.nosex
+
+```
+
+## NF62 Factorial ANOVA of FC for FABP1 with Sex
+Note, without sex, there is no significant signal on the dunnett, but with inclusion PFOA is significantly downregulated. HOWEVER, PFOA has severe skew towards females.
+```{r 51 chunk NF62 fabp FoldC fabp NF stage, echo=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.fabp <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.fabp$Ln_FoldC, NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Sex.x) 
+NF62_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Block.x) 
+NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF62_x2207_FoldC_stat.fabp)
+  x2207.III.ANOVA.FoldC.fabp.sex <- Anova(x2207.ANOVA.FoldC.car.fabp.sex, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.fabp.sex 
+  summary(x2207.ANOVA.FoldC.car.fabp.sex)
+  plot(x2207.ANOVA.FoldC.car.fabp.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ postHocs.fabp.sex <- glht(x2207.ANOVA.FoldC.car.fabp.sex, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+ summary(postHocs.fabp.sex) #this Dunnett shows a significant decrease for PFOA, however, there is a singular male for that group, so not reliable estimate with inclusion of sex
+
+   print(NF62_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF62 ANOVA Table for aov(fabpLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 52 chunk fabp 62 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp.sex, digits = 3)
+```
+## NF62 Post-hoc Table for aov(fabpLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 53 chunk dunnet fabp post hoc table set up, echo = FALSE, include=FALSE}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.fabp.sex)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.fabp.sex))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("MIX-Control","PFHxA-Control","PFHxS-Control", "PFOA-Control", "PFOS-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 54 chunk fabp post hoc table 3, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.fabp.sex <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.fabp.sex
+
+```
+## NF62 Factorial ANOVA of FC for FABP1
+```{r 30 NF62 fabp FoldC fabp NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.fabp <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.fabp$Ln_FoldC, NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Sex.x) 
+NF62_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Block.x) 
+NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.fabp$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF62_x2207_FoldC_stat.fabp)
+  x2207.III.ANOVA.FoldC.fabp <- Anova(x2207.ANOVA.FoldC.car.fabp, type = 3)
+  x2207.III.ANOVA.FoldC.fabp 
+  summary(x2207.ANOVA.FoldC.car.fabp)
+  plot(x2207.ANOVA.FoldC.car.fabp) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ postHocs.fabp <- glht(x2207.ANOVA.FoldC.car.fabp, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+ summary(postHocs.fabp) #this Dunnett shows that nothing is significant
+ 
+ 
+   print(NF62_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+   
+```
+## NF62 ANOVA Table for aov(fabpLn_FoldC ~ Block + Treatment), Type III
+```{r 31 fabp 62 anova table FoldC no sex, echo=FALSE}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp, digits = 3)
+```
+## NF62 Post-hoc Table for aov(fabpLn_FoldC ~ Block + Treatment), Type III
+```{r 53 chunk dunnet fabp no sex post hoc table set up, echo = FALSE, include=FALSE}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.fabp)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.fabp))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("MIX-Control","PFHxA-Control","PFHxS-Control", "PFOA-Control", "PFOS-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 58 chunk fabp post hoc table no sex 3, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.fabp <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.fabp
+
+```
+## NF62 Factorial ANOVA of FC for PCK1 with Sex
+```{r 32 NF62 pck FoldC pck NF stage, echo=FALSE}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.pck <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.pck$Ln_FoldC, NF62_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF62_x2207_FoldC_stat.pck$Sex.x) 
+NF62_x2207_FoldC_stat.pck$Block.x <- as.factor(NF62_x2207_FoldC_stat.pck$Block.x) 
+NF62_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.pck$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF62_x2207_FoldC_stat.pck)
+  x2207.III.ANOVA.FoldC.pck.sex <- Anova(x2207.ANOVA.FoldC.car.pck.sex, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.pck.sex 
+  summary(x2207.ANOVA.FoldC.car.pck.sex)
+  plot(x2207.ANOVA.FoldC.car.pck.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+
+```
+
+## NF62 ANOVA Table for aov(pckLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 60 chunk pck 62 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck.sex, digits = 3)
+```
+
+## NF62 Factorial ANOVA of FC for PCK1
+```{r 61 chunk NF62 pck FoldC pck NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF62_x2207_FoldC_stat.pck <-  NF62_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF62_x2207_FoldC_stat.pck$Ln_FoldC, NF62_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF62_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF62_x2207_FoldC_stat.pck$Sex.x) 
+NF62_x2207_FoldC_stat.pck$Block.x <- as.factor(NF62_x2207_FoldC_stat.pck$Block.x) 
+NF62_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF62_x2207_FoldC_stat.pck$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF62_x2207_FoldC_stat.pck)
+  x2207.III.ANOVA.FoldC.pck <- Anova(x2207.ANOVA.FoldC.car.pck, type = 3) #FLAG, model singularity from inclusion of sex
+  x2207.III.ANOVA.FoldC.pck 
+  summary(x2207.ANOVA.FoldC.car.pck)
+  plot(x2207.ANOVA.FoldC.car.pck) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+
+```
+
+## NF62 ANOVA Table for aov(pckLn_FoldC ~ Block + Treatment), Type III
+```{r 62 chunk pck 62 anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck) <- c("(Intercept)", "Block",  "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck, digits = 3)
+```
+
+
+# Preparation for NF66 Visualizing
+## Outlier exclusion for Fold Change by Treatments
+```{r 63 chunk visual prep NF66 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Checking for outliers, NF66
+#Creating manual Fold C upper and lower bounds for outliers detection based on a 3xIQR rule
+NF66.summary.stats.FoldC <- NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  dplyr::group_by(Target_Name.x, Treatment.x.x.x) %>% 
+  dplyr::summarize(q1 = quantile(FoldC, 0.25, na.rm=TRUE),
+            mean = mean(FoldC),
+            q3 = quantile(FoldC, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upperFoldC = (q3 + ((3)*IQR))) %>%
+  mutate(lowerFoldC = (q1 - ((3)*IQR))) %>%
+ dplyr::select(Treatment.x.x.x, Target_Name.x, upperFoldC, lowerFoldC)
+
+NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly <- left_join(NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly, NF66.summary.stats.FoldC, by=c("Treatment.x.x.x", "Target_Name.x" )) #joining to add in upper and lower bounds for outliers detection
+
+NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO <- NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  filter(FoldC < upperFoldC, FoldC > lowerFoldC) #checked via str before and after, and appears to have dropped observations outside this range
+
+#print(NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+#        group_by(Treatment.x.x.x, Target_Name.x) %>%
+#        summarize(Freq=n()), n=21)
+
+#Removing Control group for visualization purpose as will be replacing with an h-line for reference point
+
+#Renaming dataframe for ease reading during coding figures and ensuring levels are ordered appropriately for figures
+NF66_visualizingFoldC.df <- NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO 
+NF66_visualizingFoldC.df$Treatment.x.x.x <- factor(NF66_visualizingFoldC.df$Treatment.x.x.x, levels = c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"))
+
+```
+
+## Normalizing Fold Change to average Fold Change of Control group for each gene
+```{r 64 chunk visual prep NF66 FC graph normalize, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Calculating average Fold Change by Treatment for NF 58
+NF66_visualizingFoldC.df.test <- NF66_visualizingFoldC.df %>%
+  group_by(Treatment.x.x.x, Target_Name.x) %>%
+  dplyr::mutate(FoldC_TreatmentMean = mean(FoldC, na.rm=TRUE))
+
+#Subset controls only and ammend to dataframe --> #Creating DF of Control treatment Ct mean by target
+#NF66
+  NF66_visualizingFoldC.df.test.Control <- NF66_visualizingFoldC.df.test %>%
+    filter(Treatment.x.x.x == "Control") %>%
+    select(FoldC_TreatmentMean) %>%
+    dplyr::rename("FoldC_ControlTreatmentMean" = "FoldC_TreatmentMean") %>%
+    distinct(Target_Name.x, FoldC_ControlTreatmentMean)
+  #str(NF66_visualizingFoldC.df.test.Control)
+  
+#Joining data frames to normalize fold change to control for each treatment
+  #NF66
+  NF66_visualizingFoldC.df.join <- left_join(NF66_visualizingFoldC.df.test, NF66_visualizingFoldC.df.test.Control, by = "Target_Name.x", multiple = "all")
+  #View(x2207_FoldC.NF66)
+
+#Now I have a column FoldC_ControlTreatmentMean that has the average fold change of the control group for each gene, so that each gene can be normalized to the control group
+ NF66_visualizingnormFoldC.df <- NF66_visualizingFoldC.df.join %>%
+ mutate(normFoldC = FoldC / FoldC_ControlTreatmentMean)
+
+```
+
+# NF66 Visualization
+
+## NF66 ACOX1
+
+```{r 65 ACOX1 NF66 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#ACOX1
+NF66_x2207_normFoldC.ACOX <- NF66_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "ACOX1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    ACOX.x2207.FoldCvsTreatment.NF66 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF66_x2207_normFoldC.ACOX)
+    ACOX.x2207.FoldCvsTreatment_means.NF66 <- emmeans(ACOX.x2207.FoldCvsTreatment.NF66, ~Treatment.x.x.x.x) 
+    ACOX.x2207.FoldCvsTreatment_means_dataframe.NF66 <- data.frame(ACOX.x2207.FoldCvsTreatment_means.NF66) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("acox1"), "(NF 66)")) #title for ggplot
+
+NF66_x2207_normFoldC_means.ACOX <- ggplot(data=ACOX.x2207.FoldCvsTreatment.NF66, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = ACOX.x2207.FoldCvsTreatment_means_dataframe.NF66, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), ACOX.x2207.FoldCvsTreatment_means_dataframe.NF66, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF66_x2207_normFoldC_means.ACOX
+```
+
+
+## NF66 APOA5
+
+```{r 66 chunk APOA5 NF66 FC graph, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#APOA5
+NF66_x2207_normFoldC.APOA <- NF66_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "APOA5")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    APOA.x2207.FoldCvsTreatment.NF66 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF66_x2207_normFoldC.APOA) # we define a model that specifies the dependent continuous factor (smi) and independent categorical factor (Stage)
+    APOA.x2207.FoldCvsTreatment_means.NF66 <- emmeans(APOA.x2207.FoldCvsTreatment.NF66, ~Treatment.x.x.x.x) #we calculate the means within that model relative to the independent categorical factor (Stage)
+    APOA.x2207.FoldCvsTreatment_means_dataframe.NF66 <- data.frame(APOA.x2207.FoldCvsTreatment_means.NF66) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("apoa5"), "(NF 66)")) #title for ggplot
+
+NF66_x2207_normFoldC_means.APOA <- ggplot(data=APOA.x2207.FoldCvsTreatment.NF66, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = APOA.x2207.FoldCvsTreatment_means_dataframe.NF66, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), APOA.x2207.FoldCvsTreatment_means_dataframe.NF66, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF66_x2207_normFoldC_means.APOA
+```
+
+
+## NF66 FABP1
+
+```{r 67 chunk FABP1 NF66 FC graph, echo=FALSE}
+#FABP1
+NF66_x2207_normFoldC.FABP <- NF66_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "FABP1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    FABP.x2207.FoldCvsTreatment.NF66 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF66_x2207_normFoldC.FABP)
+    FABP.x2207.FoldCvsTreatment_means.NF66 <- emmeans(FABP.x2207.FoldCvsTreatment.NF66, ~Treatment.x.x.x.x) 
+    FABP.x2207.FoldCvsTreatment_means_dataframe.NF66 <- data.frame(FABP.x2207.FoldCvsTreatment_means.NF66) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("fabp1"), "(NF 66)")) #title for ggplot
+
+NF66_x2207_normFoldC_means.FABP <- ggplot(data=FABP.x2207.FoldCvsTreatment.NF66, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = FABP.x2207.FoldCvsTreatment_means_dataframe.NF66, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), FABP.x2207.FoldCvsTreatment_means_dataframe.NF66, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF66_x2207_normFoldC_means.FABP
+```
+
+
+## NF66 PCK1
+
+```{r 68 chunk PCK1 NF66 FC graph, echo=FALSE}
+#PCK1
+NF66_x2207_normFoldC.PCK <- NF66_visualizingnormFoldC.df %>%
+  filter(Target_Name.x == "PCK1")
+
+#Creating DF for Visualizing acox1 across Developmental Stages
+    PCK.x2207.FoldCvsTreatment.NF66 <-  lm(normFoldC ~ Treatment.x.x.x.x, data = NF66_x2207_normFoldC.PCK) 
+    PCK.x2207.FoldCvsTreatment_means.NF66 <- emmeans(PCK.x2207.FoldCvsTreatment.NF66, ~Treatment.x.x.x.x) 
+    PCK.x2207.FoldCvsTreatment_means_dataframe.NF66 <- data.frame(PCK.x2207.FoldCvsTreatment_means.NF66) #we associate those means to a dataframe object that we will use to run the ggplot
+
+my_title <- expression(paste(italic("pck1"), "(NF 66)")) #title for ggplot
+
+NF66_x2207_normFoldC_means.PCK <- ggplot(data=PCK.x2207.FoldCvsTreatment.NF66, aes(x=Treatment.x.x.x.x, y=normFoldC, color=Treatment.x.x.x.x)) + 
+  geom_point(size=1, alpha = 0.4, position = position_dodge(width = 0.7)) +
+    geom_hline(yintercept=1, linetype="dashed", color="#666666") +
+ geom_point(data = PCK.x2207.FoldCvsTreatment_means_dataframe.NF66, aes(x = Treatment.x.x.x.x, y = emmean), size = 4, position = position_dodge(width = 0.7)) +
+ geom_errorbar(aes(x = Treatment.x.x.x.x, y = emmean, ymin = lower.CL, ymax = upper.CL), PCK.x2207.FoldCvsTreatment_means_dataframe.NF66, width = 0.2, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(breaks = seq(0, 4, 1), limits = c(-1, 4)) +
+  scale_x_discrete(limits = c("MIX", "PFHxA", "PFHxS", "PFOA", "PFOS")) +
+  scale_color_manual(guide = "none", values = c("MIX"="purple", "PFHxA"= "blue", "PFHxS" = "darkgreen", "PFOA" = "orange", "PFOS" = "red")) +
+  labs(title = my_title, x = NULL, y = "Relative mRNA") +
+  theme_classic(base_size = 16) +
+  theme(axis.text=element_text(size=16))
+NF66_x2207_normFoldC_means.PCK
+```
+```{r 69 chunk ggarrange NF66, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+NF66_normFoldC_plots <- ggarrange(NF66_x2207_normFoldC_means.ACOX, NF66_x2207_normFoldC_means.APOA, NF66_x2207_normFoldC_means.FABP, NF66_x2207_normFoldC_means.PCK, ncol = 2, nrow = 2)
+NF66_normFoldC_plots
+```
+
+# NF66 ANOVAs
+## NF66 Factorial ANOVA of FC for ACOX1 with Sex
+Note, significant interaction between sex and treatment, so need to analyze sex differently; PFHxS significant reduced ACOX expression for males only
+```{r 70 chunk NF66 FoldC ACOX, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.acox <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.acox$Ln_FoldC, NF66_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions; Note that this is close though so be wary becaus p < 0.1
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF66_x2207_FoldC_stat.acox$Sex.x) 
+NF66_x2207_FoldC_stat.acox$Block.x <- as.factor(NF66_x2207_FoldC_stat.acox$Block.x) 
+NF66_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.acox$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF66_x2207_FoldC_stat.acox)
+   x2207.III.ANOVA.FoldC.acox.sex <- Anova(x2207.ANOVA.FoldC.car.acox.sex, type = 3) 
+   x2207.III.ANOVA.FoldC.acox.sex #Notable, a two-way interaction indicates the need to break down to two way anova on the basis of sex to tease apart what's happening.
+    summary(x2207.ANOVA.FoldC.car.acox.sex)
+    plot(x2207.ANOVA.FoldC.car.acox.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ # Not appropriate due to two-way interaction
+ 
+    print(NF66_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+## NF66 ANOVA Table for aov(acoxLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 71 chunk chunk ANOVA SVL table, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox.sex, digits = 3)
+```
+
+## (Males only) NF66 Factorial ANOVA of FC for ACOX1
+```{r 72 chunk NF66 FoldC ACOX males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.acox.male <- NF66_x2207_FoldC_stat.acox %>%
+  filter(Sex.x == "Male")
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.acox.male$Ln_FoldC, NF66_x2207_FoldC_stat.acox.male$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.acox.male$Sex.x <- as.factor(NF66_x2207_FoldC_stat.acox.male$Sex.x) 
+NF66_x2207_FoldC_stat.acox.male$Block.x <- as.factor(NF66_x2207_FoldC_stat.acox.male$Block.x) 
+NF66_x2207_FoldC_stat.acox.male$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.acox.male$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox.males <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.acox.male)
+  x2207.III.ANOVA.FoldC.acox.males <- Anova(x2207.ANOVA.FoldC.car.acox.males, type = 3) 
+  x2207.III.ANOVA.FoldC.acox.males 
+  
+  summary(x2207.ANOVA.FoldC.car.acox.males)
+  plot(x2207.ANOVA.FoldC.car.acox.males) #assessing assumptions using plots of residuals and QQ-plot. 
+      #Looking at this need to exclude datapoint 21 and re-assess based on cook's distance
+    
+  ##Males subbed out excluding outlier point via cook's distance
+    NF66_x2207_FoldC_stat.acox.male.N21 <- NF66_x2207_FoldC_stat.acox.male[-c(21), ]
+    x2207.ANOVA.FoldC.car.acox.males.n21 <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.acox.male.N21)
+    x2207.III.ANOVA.FoldC.acox.males.21 <- Anova(x2207.ANOVA.FoldC.car.acox.males.n21, type = 3) 
+    x2207.III.ANOVA.FoldC.acox.males.21
+    summary(x2207.ANOVA.FoldC.car.acox.males.n21)
+    plot(x2207.ANOVA.FoldC.car.acox.males.n21) 
+    
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+    postHocs.males.acox <- glht(x2207.ANOVA.FoldC.car.acox.males, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+    summary(postHocs.males.acox)
+ 
+    print(NF66_x2207_FoldC_stat.acox.male %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+    
+    
+    postHocs.males.acox.n21 <- glht(x2207.ANOVA.FoldC.car.acox.males.n21, linfct=mcp(Treatment.x.x.x = "Dunnett"))
+    summary(postHocs.males.acox.n21)
+ 
+    print(NF66_x2207_FoldC_stat.acox.male.N21 %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21) 
+        
+ 
+```
+
+## (Males only) NF66 ANOVA Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 73 chunk acox 66 anova table FoldC males, echo=FALSE}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox.males.21) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox.males.21) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox.males.21, digits = 3)
+```
+## (Males only) NF66 Post-hoc Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 74 chunk dunnet acox post hoc table set up 2, echo=FALSE, include=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.males.acox.n21)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.males.acox.n21))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("MIX-Control","PFHxA-Control","PFHxS-Control", "PFOA-Control", "PFOS-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+
+```{r 75 chunk acox post hoc table, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.males.acox <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.males.acox
+
+```
+
+## (Females only) NF66 Factorial ANOVA of FC for ACOX1
+```{r 72 chunk NF66 FoldC ACOX females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.acox.female <- NF66_x2207_FoldC_stat.acox %>%
+  filter(Sex.x == "Female")
+
+##Step 2 -- exploring data
+
+leveneTest(NF66_x2207_FoldC_stat.acox.female$Ln_FoldC, NF66_x2207_FoldC_stat.acox.female$Treatment.x.x.x, center=median) ## Significant difference in variance, so may need a non-parametric approach, Welch's ; HOWEVER, residual plots look fine...
+
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.acox.female$Sex.x <- as.factor(NF66_x2207_FoldC_stat.acox.female$Sex.x) 
+NF66_x2207_FoldC_stat.acox.female$Block.x <- as.factor(NF66_x2207_FoldC_stat.acox.female$Block.x)
+NF66_x2207_FoldC_stat.acox.female$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.acox.female$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+x2207.ANOVA.FoldC.car.acox.females <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.acox.female)
+x2207.III.ANOVA.FoldC.acox.females <- Anova(x2207.ANOVA.FoldC.car.acox.females, type = 3)
+x2207.III.ANOVA.FoldC.acox.females
+
+summary(x2207.ANOVA.FoldC.car.acox.females)
+plot(x2207.ANOVA.FoldC.car.acox.females) 
+    
+    print(NF66_x2207_FoldC_stat.acox.female %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+    #Not necessary 
+     
+```
+
+## (Females only) NF66 ANOVA Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 77 chunk acox 66 anova table FoldC females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox.females) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox.females) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox.females, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for ACOX1 
+```{r 78 chunk NF66 FoldC ACOX NF no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.acox <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "ACOX1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.acox$Ln_FoldC, NF66_x2207_FoldC_stat.acox$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions; Not that this is close though so be wary because p < 0.1
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.acox$Sex.x <- as.factor(NF66_x2207_FoldC_stat.acox$Sex.x)
+NF66_x2207_FoldC_stat.acox$Block.x <- as.factor(NF66_x2207_FoldC_stat.acox$Block.x)
+NF66_x2207_FoldC_stat.acox$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.acox$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.acox <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.acox)
+  x2207.III.ANOVA.FoldC.acox <- Anova(x2207.ANOVA.FoldC.car.acox, type = 3) 
+  x2207.III.ANOVA.FoldC.acox 
+  summary(x2207.ANOVA.FoldC.car.acox)
+  plot(x2207.ANOVA.FoldC.car.acox) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+ 
+    print(NF66_x2207_FoldC_stat.acox %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+     
+```
+## NF66 ANOVA Table for aov(acoxLn_FoldC ~ Block + Treatment), Type III
+```{r 79 acox 66 anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.acox) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.acox) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.acox, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for APOA5 with Sex
+```{r 80 NF66 apoa FoldC apoa, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.apoa <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.apoa$Ln_FoldC, NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Sex.x)
+NF66_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Block.x)
+NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF66_x2207_FoldC_stat.apoa)
+  x2207.III.ANOVA.FoldC.apoa.sex <- Anova(x2207.ANOVA.FoldC.car.apoa.sex, type = 3) 
+  x2207.III.ANOVA.FoldC.apoa.sex 
+  summary(x2207.ANOVA.FoldC.car.apoa.sex)
+  plot(x2207.ANOVA.FoldC.car.apoa.sex) #assessing assumptions using plots of residuals and QQ-plot.
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+ 
+  print(NF66_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+     
+```
+
+## NF66 ANOVA Table for aov(apoaLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 81 chunk apoa 66 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa.sex, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for APOA5
+```{r 82 chunk NF66 apoa FoldC apoa NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.apoa <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "APOA5") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.apoa$Ln_FoldC, NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.apoa$Sex.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Sex.x) 
+NF66_x2207_FoldC_stat.apoa$Block.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Block.x) 
+NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.apoa$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.apoa <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.apoa)
+  x2207.III.ANOVA.FoldC.apoa <- Anova(x2207.ANOVA.FoldC.car.apoa, type = 3) 
+  x2207.III.ANOVA.FoldC.apoa 
+  summary(x2207.ANOVA.FoldC.car.apoa)
+  plot(x2207.ANOVA.FoldC.car.apoa) #assessing assumptions using plots of residuals and QQ-plot.
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+  
+   print(NF66_x2207_FoldC_stat.apoa %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+
+## NF66 ANOVA Table for aov(apoaLn_FoldC ~ Block + Treatment), Type III
+```{r 83 chunk apoa 66 anova table FoldC no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.apoa) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.apoa) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.apoa, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for FABP1 with Sex
+```{r 84 chunk NF66 fabp FoldC fabp NF stage, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.fabp <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.fabp$Ln_FoldC, NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Sex.x) 
+NF66_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Block.x) 
+NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF66_x2207_FoldC_stat.fabp)
+  x2207.III.ANOVA.FoldC.fabp.sex <- Anova(x2207.ANOVA.FoldC.car.fabp.sex, type = 3) 
+  x2207.III.ANOVA.FoldC.fabp.sex 
+  summary(x2207.ANOVA.FoldC.car.fabp.sex)
+  plot(x2207.ANOVA.FoldC.car.fabp.sex) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+  
+   print(NF66_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+ 
+```
+
+## NF66 ANOVA Table for aov(fabpLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 85 chunk fabp 66 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp.sex, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for FABP1
+```{r 86 chunk NF66 fabp FoldC fabp NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.fabp <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "FABP1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.fabp$Ln_FoldC, NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.fabp$Sex.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Sex.x) 
+NF66_x2207_FoldC_stat.fabp$Block.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Block.x) 
+NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.fabp$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.fabp <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.fabp)
+  x2207.III.ANOVA.FoldC.fabp <- Anova(x2207.ANOVA.FoldC.car.fabp, type = 3) 
+  x2207.III.ANOVA.FoldC.fabp 
+  summary(x2207.ANOVA.FoldC.car.fabp)
+  plot(x2207.ANOVA.FoldC.car.fabp) #assessing assumptions using plots of residuals and QQ-plot. 
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+ 
+  print(NF66_x2207_FoldC_stat.fabp %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+```
+
+## NF66 ANOVA Table for aov(fabpLn_FoldC ~ Block + Treatment), Type III
+```{r 87 chunk fabp 66 anova table FoldC no sex, echo=FALSE}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.fabp) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.fabp) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.fabp, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for PCK1 with Sex
+```{r 88 chunk NF66 pck FoldC pck NF stage, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.pck <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.pck$Ln_FoldC, NF66_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF66_x2207_FoldC_stat.pck$Sex.x) 
+NF66_x2207_FoldC_stat.pck$Block.x <- as.factor(NF66_x2207_FoldC_stat.pck$Block.x) 
+NF66_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.pck$Treatment.x.x.x)
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck.sex <- aov(Ln_FoldC ~ Block.x + Sex.x*Treatment.x.x.x, data =NF66_x2207_FoldC_stat.pck)
+  x2207.III.ANOVA.FoldC.pck.sex <- Anova(x2207.ANOVA.FoldC.car.pck.sex, type = 3) 
+  x2207.III.ANOVA.FoldC.pck.sex
+  summary(x2207.ANOVA.FoldC.car.pck.sex)
+  plot(x2207.ANOVA.FoldC.car.pck.sex)
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+  #Not necessary
+ 
+ print(NF66_x2207_FoldC_stat.pck %>%
+        group_by(Treatment.x.x.x, Target_Name.x, Sex.x) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF66 ANOVA Table for aov(pckLn_FoldC ~ Block + Sex * Treatment), Type III
+```{r 89 chunk pck 66 anova table FoldC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck.sex) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck.sex) <- c("(Intercept)", "Block", "Sex", "PFAS", "PFAS:Sex", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck.sex, digits = 3)
+```
+
+## NF66 Factorial ANOVA of FC for PCK1
+```{r 90 chunk NF66 pck FoldC pck NF stage no sex, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+##Step1 — enter data
+NF66_x2207_FoldC_stat.pck <-  NF66_x2207_FoldC.calculated.stream.ExperimentalTreatOnly.NEO %>%
+  filter(Target_Name.x == "PCK1") %>%
+  mutate(Ln_FoldC = log(FoldC))
+
+##Step 2 -- exploring data
+leveneTest(NF66_x2207_FoldC_stat.pck$Ln_FoldC, NF66_x2207_FoldC_stat.pck$Treatment.x.x.x, center=median) #non-significant, can consider assumption for homogeniety of variance to be met so will assess plot function to assess quality of model for other assumptions
+  
+##Step 3 -- construct/choose your contrasts
+#Defining variables as factor, as is necessary
+NF66_x2207_FoldC_stat.pck$Sex.x <- as.factor(NF66_x2207_FoldC_stat.pck$Sex.x)
+NF66_x2207_FoldC_stat.pck$Block.x <- as.factor(NF66_x2207_FoldC_stat.pck$Block.x)
+NF66_x2207_FoldC_stat.pck$Treatment.x.x.x <- as.factor(NF66_x2207_FoldC_stat.pck$Treatment.x.x.x) 
+
+##Step 4 -- Compute the ANOVA
+  x2207.ANOVA.FoldC.car.pck <- aov(Ln_FoldC ~ Block.x + Treatment.x.x.x, data =NF66_x2207_FoldC_stat.pck)
+  x2207.III.ANOVA.FoldC.pck <- Anova(x2207.ANOVA.FoldC.car.pck, type = 3)
+  x2207.III.ANOVA.FoldC.pck 
+  summary(x2207.ANOVA.FoldC.car.pck)
+  plot(x2207.ANOVA.FoldC.car.pck)
+
+    
+##Step 5 -- Compute contrasts or post-hoc tests 
+ #Not necessary
+  
+  print(NF66_x2207_FoldC_stat.pck %>%
+        group_by(Treatment.x.x.x, Target_Name.x) %>%
+        summarize(Freq=n()), n=21)
+
+```
+
+## NF66 ANOVA Table for aov(pckLn_FoldC ~ Block + Treatment), Type III
+```{r 91 chunk pck 66 anova table FoldC no sex, echo=FALSE}
+#printing table with x2205 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.ANOVA.FoldC.pck) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.ANOVA.FoldC.pck) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.ANOVA.FoldC.pck, digits = 3)
+```

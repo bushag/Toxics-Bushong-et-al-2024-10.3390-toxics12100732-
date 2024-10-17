@@ -1,0 +1,2567 @@
+---
+title: "Effects of perfluorinated alkyl substances (PFAS) on amphibian body & liver condition: Is lipid metabolism being perturbed throughout metamorphosis?"
+author: "Anna Bushong"
+date: "2024-08-15"
+output:
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+  word_document: 
+    number_sections: true
+---
+
+# Rmarkdown for Apical Analysis 
+
+The following markdown includes visualization, analyses, and associated tables referenced in sections 3.1 and 3.2.
+
+The Rmarkdown is broadly organized by apical endpoint (i.e. Mass, SVL, SMI, SHI, HSI), ending with a multivariate Cox analysis. For navigating, the outline in RStudio can be viewed in the lower left, or upon knitting the document to an html or PDF the table of content can be used.
+
+```{r 1 chunk setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(kableExtra.auto_format = FALSE) # for formatting table
+```
+
+# Setting Environment, Loading Dataframes, and Constructing Dataframe
+```{r 2 chunk packages and data, results = 'hide', message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Loading Packages
+library(effects) # very convenient package for quickly assessing model results
+library(emmeans) # used in the calculation of model means and post-hoc tests
+library(ggplot2) # package for plots
+library(lmodel2) # package for SMA regression for smi
+library(car) # multivariate stats, specifically ancova
+library(lmerTest) # lets you output p-values with summary calls on lme4
+library(dplyr) # data manipulation
+library(tidyr) # needed for data manipulation at end of code
+library(lattice) # package essential for data visualization
+library(ggpubr) # package for ggarrange
+library(stringr) # package for plot title manipulation 
+library(rstatix) # package for identifying outliers based on IQR method
+library(multcomp) # package for post-hoc testing
+library(knitr) # for table formatting
+library(gtExtras) # for table formatting
+library(gt) # for table formatting
+library(ggbreak) # for inserting axis breaks
+library(formatR) # for setting text to wrap in PDF knit
+
+# Apical dataframe --- edit file path for your computer
+x2207.data <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_CF.090_CF.091_Digitized_071422.csv")
+
+# Streamlining and Mutating Apical dataframe
+x2207.data.filter <- x2207.data %>%
+  dplyr::select(Treatment, Individual_ID, Block, NF_Stage, SVL, Mass, Whole_Liver_Mass, Experimental_Day, Fat_Body_Mass) %>%
+  mutate(Liver_mg = (Whole_Liver_Mass*1000)) %>%
+  mutate(LSI = ((Whole_Liver_Mass/Mass)*100)) %>%
+  mutate(FSI = ((Fat_Body_Mass/Mass)*100))
+#str(x2207.data.filter)
+
+x2207.data.filter$NF_Stage <- as.factor(x2207.data.filter$NF_Stage) # ensuring NF stage is treated as factor
+
+x2207.data.filter <- x2207.data.filter %>%
+ filter(NF_Stage != "59") # removing the individual animal that staged-out of NF 58 before sampling
+
+
+# Sex dataframe --- edit file path for your computer
+x2207.finalsex <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_SexDatawithRedos082323_working.csv")
+
+# Joining Apical and Sex dataframes
+x2207_joined.df.V2 <- left_join(x2207.data.filter, x2207.finalsex, by="Individual_ID") #dataframe with updated sex data
+x2207_joined.df.V2$Sex <- as.factor(x2207_joined.df.V2$Sex)
+x2207_joined.df.V2$NF_Stage <- as.factor(x2207_joined.df.V2$NF_Stage)
+
+#str(x2207_joined.df.V2)
+
+```
+# Sample Sizes by group
+``` {r 3 chunk sample size table, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+# Table shows we have at minimum n=3 for males across developmental stage and PFAS treatment; Notably, 'NA' for sex in MIX and PFOS groups indicate either mortality during study, or sample loss.
+
+print(x2207_joined.df.V2 %>%
+        filter(NF_Stage != "59") %>%
+       group_by(Treatment, Sex, NF_Stage) %>%
+      summarize(Freq=n()), n=100) 
+
+```
+# Outlier Assessment for Apical endpoints by group 
+``` {r 4 chunk outlier, message=FALSE, results = 'hide', tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Outlier assessment by treatment, NF stage, and Sex prior to SMI and SHI calculation, specifically checking for extreme outliers (3xIQR) in the control group at this time
+
+# Mass
+x2207.data.filter.check <-  x2207_joined.df.V2 %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  identify_outliers(Mass)  %>%
+ dplyr::select(Individual_ID, NF_Stage, Sex, Mass, Block, is.outlier, is.extreme)
+x2207.data.filter.check 
+  #Mix 23, PFHxA 17, PFHxS 5, PFHxS 10, PFOA 25; No extreme outliers in control group
+
+# SVL
+x2207.data.filter.check <-  x2207_joined.df.V2 %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  identify_outliers(SVL)  %>%
+ dplyr::select(Individual_ID, NF_Stage, Sex, Whole_Liver_Mass, Block, is.outlier, is.extreme)
+x2207.data.filter.check 
+  #PFOS 18, No extreme outliers in control group
+
+# Whole Liver Mass
+x2207.data.filter.check <-  x2207_joined.df.V2 %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  identify_outliers(Whole_Liver_Mass)  %>%
+ dplyr::select(Individual_ID, NF_Stage, Sex, Whole_Liver_Mass, Block, is.outlier, is.extreme)
+x2207.data.filter.check 
+  #PFHxA 28, No extreme outliers in control group
+
+```
+# Calculating Scaled Mass Index (SMI)
+```{r 5 chunk SMI, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Subsetting dataframe to include only the Control group for calculating the bSMA for SMI and SHI calculations
+x2207.C <- x2207_joined.df.V2 %>%
+  filter(Treatment == "Control") %>%
+  mutate(log_Mass = log(Mass),
+         log_SVL = log(SVL),
+         log_Liver = log(Liver_mg)) # Note, log() command in R performs a natural logarithm by default
+
+#..............................................................................................
+
+#Outline for calculating smi:
+#(1) Filter to remove units from "pilot" study to only keep units from x2207, plus adding log transformed variable for use in sma regression;
+#(2) Fit SMA regression using natural log transformed variables by developmental stage;
+#(3) Extract the slope of the SMA, which is the bsma expononent in the smi equation reported by Peig & Green, 2009. The slope output of the regression which are below.;
+#(4) Call the SMA plot to visualize this relationship.;
+#(5) Calculate L0 (average SVL of the reference group);
+#(6) Calculate L0/Li;
+#(7) Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the calculated smi values for each experimental unit to the dataframe as a new variable.;
+#(8) Now that all smi has been calculated by developmental stage, need to bind these together into a single dataframe and then select down, and merge to original dataframe via 'Individual'.
+
+#..............................................................................................
+
+#1. Filter and adding log transformed variable for use in sma regression
+  #completed above in pre-processing
+
+#2. Fit SMA regression using natural log transformed variables by NF_Stage
+
+#NF58
+    x2207.df.58 <- x2207.C %>% 
+      filter(NF_Stage == "58") # Dataframe subsetting NF 58 from only the control group
+    
+    x2207.bsma.58 <- lmodel2(log_Mass ~ log_SVL, data = x2207.df.58, "interval", "interval", nperm=99)
+    x2207.bsma.58
+  
+  #NF62
+    x2207.df.62 <- x2207.C %>%
+      filter(NF_Stage == "62") # Dataframe subsetting NF 62 from only the control group
+    
+    x2207.bsma.62 <- lmodel2(log_Mass ~ log_SVL, data = x2207.df.62, "interval", "interval", nperm=99)
+    x2207.bsma.62
+
+  #NF66
+    x2207.df.66 <- x2207.C %>%
+      filter(NF_Stage == "66") # Dataframe subsetting NF 66 from only the control group
+
+    x2207.bsma.66 <- lmodel2(log_Mass ~ log_SVL, data = x2207.df.66, "interval", "interval", nperm=99)
+    x2207.bsma.66
+
+#3. Extract the slope of the SMA, which is the bSMA exponent in the SMI equation reported by Peig & Green, 2009. The slope output of the regression is below. and #4. Call the SMA plot to visualize this relationship
+
+# NF58:
+# Slope of SMA = 0.94944701 
+# r2 = 0.002891963 
+    # Note, this is a low r2; Upon visual inspection, a linear relationship still appears to be present, so low r2 likely influenced by sample size of the control group.
+plot(x2207.bsma.58, method="SMA")
+      
+  x2207.data.filter.58 <- x2207_joined.df.V2 %>%
+  filter(NF_Stage == "58")
+
+      #5. Calculate L0
+      x2207.SVL.charac.58 <- mean(x2207.df.58$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.58 #22.26364, which is the mean Snout-Vent-Length of this study
+
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.58 <- x2207.SVL.charac.58/x2207.data.filter.58$SVL #L0/Li
+
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.58$smi <- x2207.data.filter.58$Mass*x2207.SVL.charac.standard.58^0.94944701	
+    
+# NF62:
+# Slope of SMA = 1.9728918
+# r2 = 0.1179943 
+      # Note, this is a low r2; Upon visual inspection, a linear relationship still appears to be present, so low r2 likely influenced by sample size of the control group.
+plot(x2207.bsma.62, method="SMA")
+
+    x2207.data.filter.62 <- x2207_joined.df.V2 %>%
+    filter(NF_Stage =="62")
+  
+      #5. Calculate L0
+      x2207.SVL.charac.62 <- mean(x2207.df.62$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.62 #16.19833, which is the mean Snout-Vent-Length of this study
+
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.62 <- x2207.SVL.charac.62/x2207.data.filter.62$SVL #L0/Li
+
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.62$smi <- x2207.data.filter.62$Mass*x2207.SVL.charac.standard.62^1.9728918
+
+# NF66:
+# Slope of SMA = 2.374614
+# r2 = 0.4366484
+      # Note, this is a lower r2; Upon visual inspection, a linear relationship still appears to be present, so low r2 likely influenced by sample size of the control group.
+plot(x2207.bsma.66, method="SMA")
+
+    x2207.data.filter.66 <- x2207_joined.df.V2 %>%
+    filter(NF_Stage =="66")
+
+      #5. Calculate L0
+      x2207.SVL.charac.66 <- mean(x2207.df.66$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.66 #16.2725, which is the mean Snout-Vent-Length of this study
+      
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.66 <- x2207.SVL.charac.66/x2207.data.filter.66$SVL #L0/Li
+      
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.66$smi <- x2207.data.filter.66$Mass*x2207.SVL.charac.standard.66^2.374614	
+
+
+
+```
+# Calculating Scaled Hepatic Index (SHI)
+```{r 6 chunk SHI, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#..............................................................................................
+
+#Outline for calculating SHI:
+#(1) Filter as necessary to remove outliers prior to bSMA calc, plus adding log transformed variable for use in sma regression;
+#(2) Fit SMA regression using natural log transformed variables by developmental stage;
+#(3) Extract the slope of the SMA, which is the bsma expononent in the smi equation reported by Peig & Green, 2009. The slope output of the regression which are below.;
+#(4) Call the SMA plot to visualize this relationship.;
+#(5) Calculate L0;
+#(6) Calculate L0/Li;
+#(7) Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the calculated smi values for each experimental unit to the dataframe as a new variable.;
+#(8) Now that all smi has been calculated by developmental stage, need to bind these together into a single dataframe and then select down, and merge to original dataframe via 'Individual'.
+
+#..............................................................................................
+
+#1. Filter and adding log transformed variable for use in sma regression
+  #completed above in pre-processing
+
+#2. Fit SMA regression using natural log transformed variables by NF_Stage
+  
+  #NF58
+    x2207.bsma.58.shi <- lmodel2(log_Liver ~ log_SVL, data = x2207.df.58, "interval", "interval", nperm=99)
+    x2207.bsma.58.shi
+  
+  #NF62
+    x2207.bsma.62.shi <- lmodel2(log_Liver ~ log_SVL, data = x2207.df.62, "interval", "interval", nperm=99)
+    x2207.bsma.62.shi
+
+  #NF66
+    x2207.bsma.66.shi <- lmodel2(log_Liver ~ log_SVL, data = x2207.df.66, "interval", "interval", nperm=99)
+    x2207.bsma.66.shi
+
+#3. Extract the slope of the SMA, which is the bsma exponent in the SMI equation reported by Peig & Green, 2009. The slope output of the regression is below. and #4. Call the SMA plot to visualize this relationship
+
+# NF58:
+# Slope of SMA = 1.8631870 
+# r2 = 0.004150432 
+    # Note, this is a low r2; Upon visual inspection, a linear relationship still appears to be present, so low r2 likely influenced by sample size of the control group.
+plot(x2207.bsma.58.shi, method="SMA")
+
+      #5. Calculate L0
+      x2207.SVL.charac.58 <- mean(x2207.df.58$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.58 #22.26364, which is the mean Snout-Vent-Length of this study
+
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.58 <- x2207.SVL.charac.58/x2207.data.filter.58$SVL #L0/Li
+
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the         calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.58$shi <- x2207.data.filter.58$Liver_mg*x2207.SVL.charac.standard.58^1.8631870	
+
+      
+# NF62:
+# Slope of SMA = 3.8164896
+# r2 = 0.05333134 
+      # Note, this is a low r2; Upon visual inspection, a linear relationship still appears to be present, so low r2 likely influenced by sample size of the control group.
+plot(x2207.bsma.62.shi, method="SMA")
+
+      #5. Calculate L0
+      x2207.SVL.charac.62 <- mean(x2207.df.62$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.62 #16.19833, which is the mean Snout-Vent-Length of this study
+
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.62 <- x2207.SVL.charac.62/x2207.data.filter.62$SVL #L0/Li
+
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the         calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.62$shi <- x2207.data.filter.62$Liver_mg*x2207.SVL.charac.standard.62^3.8164896	
+
+# NF66:
+# Slope of SMA = 5.989771
+# r2 = 0.2506536
+plot(x2207.bsma.66.shi, method="SMA")
+
+      #5. Calculate L0
+      x2207.SVL.charac.66 <- mean(x2207.df.66$SVL, na.rm = T)	#L0
+      x2207.SVL.charac.66 #16.2725, which is the mean Snout-Vent-Length of this study
+      
+      #6. Calculate L0/Li
+      x2207.SVL.charac.standard.66 <- x2207.SVL.charac.66/x2207.data.filter.66$SVL #L0/Li
+      
+      #7. Raise L0/Li to the power of the bsma from #3 and multiply by the individual mass, and attached the         calculated SMI values for each experimental unit to the dataframe as a new variable:
+      x2207.data.filter.66$shi <- x2207.data.filter.66$Liver_mg*x2207.SVL.charac.standard.66^5.989771	
+
+
+#8. Now that all hsi has been calculated by developmental NF_Stage, need to bind these together into a single dataframe and then select down, and merge to original dataframe via Individual
+      
+    x2207.physio.indexes <- rbind(x2207.data.filter.58, x2207.data.filter.62)
+
+    x2207.df.indexes <- rbind(x2207.physio.indexes, x2207.data.filter.66)
+
+    x2207.df.indexes.tojoin <- x2207.df.indexes %>%
+        select(Individual_ID, shi, smi)
+
+    x2207.physio.df <- left_join(x2207_joined.df.V2, x2207.df.indexes.tojoin, by="Individual_ID")
+    #View(x2207.physio.df)
+
+    x2207.physio.df$NF_Stage <- as.factor(x2207.physio.df$NF_Stage)
+
+    x2207.physio.df <- x2207.physio.df %>%
+        filter(NF_Stage != "59") #removing single NF59 observation
+
+    # head(x2207.df.indexes)
+    # head(x2207.df.indexes.tojoin)
+    # When checking using head, can confirm below dataframes successfully joined
+      head(x2207.physio.df) 
+        
+```
+
+# Mass (Outlier assessment, Visualization, ANOVAs, Assumption checking, Post-hoc analysis)
+## QA/QC and exclusion of extreme outliers for Mass
+```{r 7 chunk Mass QA/QC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Constructing dataframe to define upper and lower bounds for outlier exclusion
+x2207.physio.df.massNEO <- x2207.physio.df %>% 
+  group_by(Treatment, NF_Stage, Sex) %>% 
+  filter(Sex == "Male" | Sex == "Female") %>%
+  dplyr::summarize(q1 = quantile(Mass, 0.25, na.rm=TRUE),
+            mean = mean(Mass),
+            q3 = quantile(Mass, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upper_mass = (q3 + ((3)*IQR))) %>%
+  mutate(lower_mass = (q1 - ((3)*IQR))) %>%
+  dplyr::select(Treatment, NF_Stage, Sex, upper_mass, lower_mass)
+
+# str(x2207.physio.df) # indicates n=215 prior to exclusions
+
+# Joining to add in upper and lower bounds for outliers detection
+x2207.physio.df.massBounds <- left_join(x2207.physio.df, x2207.physio.df.massNEO, by=c("Treatment", "NF_Stage", "Sex")) 
+
+# Dataframe that excludes extreme outliers based on upper and lower bounds calculated lines 342-351
+x2207.physio.df.massBounds.NO2 <- x2207.physio.df.massBounds %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  filter(Mass < upper_mass, Mass > lower_mass) %>%
+  mutate(Functional_Group = case_when(Treatment == 'Control' ~ 'Control',
+                           Treatment == 'PFOS' | Treatment == 'PFHxS' ~'Sulfonate',
+                          Treatment == 'PFOA' | Treatment == 'PFHxA' ~ 'Carboxylate',
+                          Treatment == 'MIX' ~ "Mixture")) 
+
+# Dataframe went from n=215 to n=207, excluding 8 replicates (3 of which were samples that either failed to have sex determined or was a mortality)
+# str(x2207.physio.df.massBounds.NO2) 
+
+# Table indicates that after exclusions, the sex number ranges n=3-9 per treatment and developmental stage
+print(x2207.physio.df.massBounds.NO2 %>%
+        group_by(Treatment, NF_Stage, Sex) %>%
+        summarize(Freq=n()), n=40) 
+
+# Setting order of levels for treatment for ease of visualization purposes
+x2207.physio.df.massBounds.NO2$Treatment <- factor(x2207.physio.df.massBounds.NO2$Treatment, levels=c("Control", "PFHxA", "PFOA", "PFHxS", "PFOS", "MIX"))
+
+x2207.physio.df.massBounds.NO2$Functional_Group <- factor(x2207.physio.df.massBounds.NO2$Functional_Group, levels=c("Control", "Carboxylate", "Sulfonate", "Mixture"))
+
+#For the sake of not hard-recoding figures, renaming dataframe that has excluded replicates based on 3xIQR 
+x2207.physio.df.massNEO <- x2207.physio.df.massBounds.NO2 
+```
+## Visualization for Mass
+```{r 8 chunk Mass Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+# Creating linear model for visualizing mass across developmental stages
+massvsTreatment <-  lm(Mass ~ Treatment + NF_Stage, data = x2207.physio.df.massNEO) 
+massvsTreatment_means <- emmeans(massvsTreatment, ~Treatment + NF_Stage) # using emmeans to pull marginal means from model
+massvsTreatment_means_dataframe <- data.frame(massvsTreatment_means) # assigning to dataframe
+
+#Plotting the mean mass by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.mass.figure <- ggplot(data = x2207.physio.df.massNEO, aes(x = Treatment, y = Mass, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = massvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = massvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+      labs(x=NULL, y="Mass (g)") +
+        scale_y_continuous(breaks = seq(0.3, 1.2, 0.20), limits = c(0.3, 1.2)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+x2207.mass.figure
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+## ANOVA for Mass between Treatments with Sex (all NF stages)
+```{r 9 chunk Mass ANOVA All NF, warning=FALSE, message=FALSE}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.massNEO$NF_Stage <- factor(x2207.physio.df.massNEO$NF_Stage, levels = c("58", "62", "66"))
+x2207.physio.df.massNEO$Block <- as.factor(x2207.physio.df.massNEO$Block)
+x2207.physio.df.massNEO$Sex <- as.factor(x2207.physio.df.massNEO$Sex)
+x2207.physio.df.massNEO$Treatment <- as.factor(x2207.physio.df.massNEO$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.massNEO$Mass, x2207.physio.df.massNEO$Treatment, center=median)
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing, and setting orthogonal for developmental stage
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.massNEO$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+
+  #Step 4 -- Compute the ANOVA
+    x2207.Anova.mass.car <- aov(Mass~ Block + Sex*NF_Stage*Treatment, data=x2207.physio.df.massNEO)
+    x2207.III.mass.ANOVA <- Anova(x2207.Anova.mass.car, type = "III")
+    x2207.III.mass.ANOVA #no diff from type I seemingly
+    summary(x2207.Anova.mass.car)
+    plot(x2207.Anova.mass.car)
+
+#Step 5 -- Compute post-hoc tests 
+  postHocs <- glht(x2207.Anova.mass.car, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) #this dunnett shows that no significant differences across any PFAS treatments
+  
+
+```
+## ANOVA Table for aov(Mass ~ Block + Sex * NF Stage * Treatment), Type III
+```{r 10 chunk ANOVA mass table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Table with x2207 ANOVA output; We can see there is a signficant effect of NF stage on Mass and residual plots may show slight heterosk. of residuals. Determined prudent to evaluate by NF stage to check for signal.
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.mass.ANOVA) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.mass.ANOVA) <- c("(Intercept)", "Block", "Sex", "NF Stage", "PFAS", "Sex:NF Stage", "Sex:PFAS", "NF Stage:Treatment", "Sex:NF Stage:PFAS", "Residuals")
+kable(x2207.III.mass.ANOVA, digits = 3)
+
+```
+## ANOVA for NF58 Mass between Treatments with Sex 
+```{r 11 chunk Mass ANOVA NF 58, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.massNEO.NF58 <- x2207.physio.df.massNEO %>%
+  filter(NF_Stage == "58")
+x2207.physio.df.massNEO.NF58$Sex <- as.factor(x2207.physio.df.massNEO.NF58$Sex)
+x2207.physio.df.massNEO.NF58$Treatment <- as.factor(x2207.physio.df.massNEO.NF58$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.massNEO.NF58$Mass, x2207.physio.df.massNEO.NF58$Treatment, center=median) #non-significant; close at p < 0.1
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.mass.car.NF58 <- aov(Mass~ Block + Sex*Treatment, data=x2207.physio.df.massNEO.NF58)
+    x2207.III.mass.ANOVA.NF58 <- Anova(x2207.Anova.mass.car.NF58, type = "III")
+    x2207.III.mass.ANOVA.NF58 
+    
+    summary(x2207.Anova.mass.car.NF58)
+    plot(x2207.Anova.mass.car.NF58) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.mass.car.NF58, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) 
+  
+      # Table to show sample sizes by sex across treatments for NF58
+      print(x2207.physio.df.massNEO.NF58 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF58 ANOVA Table for aov(mass ~ Block + Sex * Treatment), Type III
+```{r 12 chunk Mass ANOVA NF 58 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.mass.ANOVA.NF58) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.mass.ANOVA.NF58) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.mass.ANOVA.NF58, digits = 3)
+
+```
+## ANOVA for NF62 Mass between Treatments with Sex 
+```{r 13 chunk Mass ANOVA NF 62, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.massNEO.NF62 <- x2207.physio.df.massNEO %>%
+  filter(NF_Stage == "62")
+x2207.physio.df.massNEO.NF62$Sex <- as.factor(x2207.physio.df.massNEO.NF62$Sex)
+x2207.physio.df.massNEO.NF62$Treatment <- as.factor(x2207.physio.df.massNEO.NF62$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.massNEO.NF62$Mass, x2207.physio.df.massNEO.NF62$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.mass.car.NF62 <- aov(Mass~ Block + Sex*Treatment, data=x2207.physio.df.massNEO.NF62)
+    x2207.III.mass.ANOVA.NF62 <- Anova(x2207.Anova.mass.car.NF62, type = "III")
+    x2207.III.mass.ANOVA.NF62 
+    
+    summary(x2207.Anova.mass.car.NF62)
+    plot(x2207.Anova.mass.car.NF62)  
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.mass.car.NF62, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) 
+  
+      # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.massNEO.NF62 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF62 ANOVA Table for aov(mass ~ Block + Sex * Treatment), Type III
+```{r 14 chunk Mass ANOVA NF 62 table, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.mass.ANOVA.NF62) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.mass.ANOVA.NF62) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.mass.ANOVA.NF62, digits = 3)
+
+```
+## ANOVA for NF66 Mass between Treatments with Sex 
+```{r 15 chunk Mass ANOVA NF 66, echo=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.massNEO.NF66 <- x2207.physio.df.massNEO %>%
+  filter(NF_Stage == "66")
+x2207.physio.df.massNEO.NF66$Sex <- as.factor(x2207.physio.df.massNEO.NF66$Sex)
+x2207.physio.df.massNEO.NF66$Treatment <- as.factor(x2207.physio.df.massNEO.NF66$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.massNEO.NF66$Mass, x2207.physio.df.massNEO.NF66$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.mass.car.NF66 <- aov(Mass~ Block + Sex*Treatment, data=x2207.physio.df.massNEO.NF66)
+    x2207.III.mass.ANOVA.NF66 <- Anova(x2207.Anova.mass.car.NF66, type = "III")
+    x2207.III.mass.ANOVA.NF66 
+    
+    summary(x2207.Anova.mass.car.NF66)
+    plot(x2207.Anova.mass.car.NF66) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.mass.car.NF66, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) 
+  
+      # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.massNEO.NF66 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+```
+## NF66 ANOVA Table for aov(mass ~ Block + Sex * Treatment), Type III
+```{r 16 chunk Mass ANOVA NF 66 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.mass.ANOVA.NF66) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.mass.ANOVA.NF66) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.mass.ANOVA.NF66, digits = 3)
+```
+
+# SVL (Outlier assessment, Visualization, ANOVAs, Assumption checking, Post-hoc analysis)
+## QA/QC and exclusion of extreme outliers for SVL
+```{r 17 chunk SVL QA/QC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Constructing dataframe to define upper and lower bounds for outlier exclusion
+x2207.physio.df.svlNEO <- x2207.physio.df %>%
+  group_by(Treatment, NF_Stage, Sex) %>% 
+  filter(Sex == "Male" | Sex == "Female") %>%
+  dplyr::summarize(q1 = quantile(SVL, 0.25, na.rm=TRUE),
+            mean = mean(SVL),
+            q3 = quantile(SVL, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upper_SVL = (q3 + ((3)*IQR))) %>%
+  mutate(lower_SVL = (q1 - ((3)*IQR))) %>%
+  dplyr::select(Treatment, NF_Stage, Sex, upper_SVL, lower_SVL)
+
+# str(x2207.physio.df) # indicates n=215 prior to exclusions
+
+# Joining to add in upper and lower bounds for outliers detection
+x2207.physio.df.svlBounds <- left_join(x2207.physio.df, x2207.physio.df.svlNEO, by=c("Treatment", "NF_Stage", "Sex")) 
+
+# Dataframe that excludes extreme outliers based on upper and lower bounds calculated lines 342-351
+x2207.physio.df.svlBounds.NO2 <- x2207.physio.df.svlBounds %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  filter(SVL < upper_SVL, SVL > lower_SVL) %>%
+  mutate(Functional_Group = case_when(Treatment == 'Control' ~ 'Control',
+                           Treatment == 'PFOS' | Treatment == 'PFHxS' ~'Sulfonate',
+                          Treatment == 'PFOA' | Treatment == 'PFHxA' ~ 'Carboxylate',
+                          Treatment == 'MIX' ~ "Mixture"))
+
+# Dataframe went from n=215 to n=211, excluding 4 replicates (3 of which were samples that either failed to have sex determined or was a mortality)
+# str(x2207.physio.df.svlBounds.NO2) 
+
+# Table indicates that after exclusions, the sex number ranges n=3-9 per treatment and developmental stage
+print(x2207.physio.df.svlBounds.NO2 %>%
+        group_by(Treatment, NF_Stage, Sex) %>%
+        summarize(Freq=n()), n=40)
+
+# Setting order of levels for treatment for ease of visualization purposes
+x2207.physio.df.svlBounds.NO2$Treatment <- factor(x2207.physio.df.svlBounds.NO2$Treatment, levels=c("Control", "PFHxA", "PFOA", "PFHxS", "PFOS", "MIX"))
+
+x2207.physio.df.svlBounds.NO2$Functional_Group <- factor(x2207.physio.df.svlBounds.NO2$Functional_Group, levels=c("Control", "Carboxylate", "Sulfonate", "Mixture"))
+
+#For the sake of not hard-recoding figures, renaming dataframe that has excluded replicates based on 3xIQR 
+x2207.physio.df.SVLNEO <- x2207.physio.df.svlBounds.NO2
+```
+## Visualization for SVL
+```{r 18 chunk SVL Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Creating linear model for visualizing SVL across developmental stages
+SVLvsTreatment <-  lm(SVL ~ Treatment + NF_Stage, data = x2207.physio.df.SVLNEO) 
+SVLvsTreatment_means <- emmeans(SVLvsTreatment, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+SVLvsTreatment_means_dataframe <- data.frame(SVLvsTreatment_means)  # assigning to dataframe
+
+#Plotting the mean SVL by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.SVL.figure <- ggplot(data = x2207.physio.df.SVLNEO, aes(x = Treatment, y = SVL, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = SVLvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = SVLvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+      labs(x=NULL, y="SVL (mm)") +
+        scale_y_continuous(breaks = seq(16, 26, 2), limits = c(14, 27)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14), 
+              legend.position = "none")
+x2207.SVL.figure
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+## ANOVA for SVL between Treatments with Sex (all NF stages)
+```{r 19 chunk SVL ANOVA All NF, warning=FALSE, message=FALSE}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO$NF_Stage <- factor(x2207.physio.df.SVLNEO$NF_Stage, levels = c("58", "62", "66"))
+x2207.physio.df.SVLNEO$Block <- as.factor(x2207.physio.df.SVLNEO$Block)
+x2207.physio.df.SVLNEO$Sex <- as.factor(x2207.physio.df.SVLNEO$Sex)
+x2207.physio.df.SVLNEO$Treatment <- as.factor(x2207.physio.df.SVLNEO$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO$SVL, x2207.physio.df.SVLNEO$Treatment, center=median)
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing, and setting orthogonal for developmental stage
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.SVLNEO$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+
+  #Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car <- aov(SVL~ Block + Sex*NF_Stage*Treatment, data=x2207.physio.df.SVLNEO)
+    x2207.III.SVL.ANOVA <- Anova(x2207.Anova.SVL.car, type = "III")
+    x2207.III.SVL.ANOVA #Notable, a three-way interaction indicates the need to break down to two way anova on the basis of sex to tease apart what's happening. 
+    summary(x2207.Anova.SVL.car)
+    plot(x2207.Anova.SVL.car) #Also the heteroskedasicity seems apparent, so that source may be related to NF stage, and may be then more appropriate to analyse by developmental stage
+
+#Step 5 -- Compute post-hoc tests 
+  # Not appropriate due to three-way interaction
+  
+
+```
+## ANOVA Table for aov(SVL ~ Block + Sex * NF Stage * Treatment), Type III
+```{r 20 chunk ANOVA SVL table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA) <- c("(Intercept)", "Block", "Sex", "NF Stage", "PFAS", "Sex:NF Stage", "Sex:PFAS", "NF Stage:Treatment", "Sex:NF Stage:PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA, digits = 3)
+
+```
+## ANOVA for NF58 SVL between Treatments with Sex 
+```{r 21 chunk SVL ANOVA NF 58, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF58 <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "58")
+x2207.physio.df.SVLNEO.NF58$Sex <- as.factor(x2207.physio.df.SVLNEO.NF58$Sex)
+x2207.physio.df.SVLNEO.NF58$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF58$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF58$SVL, x2207.physio.df.SVLNEO.NF58$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF58 <- aov(SVL~ Block + Sex*Treatment, data=x2207.physio.df.SVLNEO.NF58)
+    x2207.III.SVL.ANOVA.NF58 <- Anova(x2207.Anova.SVL.car.NF58, type = "III")
+    x2207.III.SVL.ANOVA.NF58 
+    
+    summary(x2207.Anova.SVL.car.NF58)
+    plot(x2207.Anova.SVL.car.NF58) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs.SVL.sex <- glht(x2207.Anova.SVL.car.NF58, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs.SVL.sex) # Due to sex being significant, seems prudent to explore data through separate ANOVA by sex for potential directionality
+  
+    # Table to show sample sizes by sex across treatments for NF58
+      print(x2207.physio.df.SVLNEO.NF58 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF58 ANOVA Table for aov(SVL ~ Block + Sex * Treatment), Type III
+```{r 22 chunk SVL ANOVA NF 58 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF58) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF58) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF58, digits = 3)
+
+```
+## NF58 Post-hoc Table for aov(SVL ~ Block + Sex * Treatment), Type III
+```{r 23 chunk SVL sex dunnet  post hoc table set up, echo = FALSE, include=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.SVL.sex)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.SVL.sex))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("PFHxA-Control","PFOA-Control", "PFHxS-Control", "PFOS-Control", "MIX-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 24 chunk SVL sex post hoc table 2, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.SVL.sex <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.SVL.sex
+
+```
+## (Males Only) ANOVA for NF58 SVL between Treatments
+```{r 25 chunk SVL ANOVA NF 58 Males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF58.males <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "58") %>%
+  filter(Sex == "Male")
+x2207.physio.df.SVLNEO.NF58.males$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF58.males$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF58.males$SVL, x2207.physio.df.SVLNEO.NF58.males$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF58.males <- aov(SVL~ Block + Treatment, data=x2207.physio.df.SVLNEO.NF58.males)
+    x2207.III.SVL.ANOVA.NF58.males <- Anova(x2207.Anova.SVL.car.NF58.males, type = "III")
+    x2207.III.SVL.ANOVA.NF58.males 
+    
+    summary(x2207.Anova.SVL.car.NF58.males)
+    plot(x2207.Anova.SVL.car.NF58.males) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  # Not necessary
+  
+    # Table to show sample sizesacross treatments for NF58 males
+      print(x2207.physio.df.SVLNEO.NF58.males %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## (Males Only) NF58 ANOVA Table for aov(SVL ~ Block + Treatment), Type III
+```{r 26 chunk SVL ANOVA NF 58 Males table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF58.males) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF58.males) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF58.males, digits = 3)
+```
+## (Females Only) ANOVA for NF58 SVL between Treatments
+```{r 27 chunk SVL ANOVA NF 58 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF58.females <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "58") %>%
+  filter(Sex == "Female")
+x2207.physio.df.SVLNEO.NF58.females$Sex <- as.factor(x2207.physio.df.SVLNEO.NF58.females$Sex)
+x2207.physio.df.SVLNEO.NF58.females$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF58.females$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF58.females$SVL, x2207.physio.df.SVLNEO.NF58.females$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF58.females <- aov(SVL~ Block + Treatment, data=x2207.physio.df.SVLNEO.NF58.females)
+    x2207.III.SVL.ANOVA.NF58.females <- Anova(x2207.Anova.SVL.car.NF58.females, type = "III")
+    x2207.III.SVL.ANOVA.NF58.females 
+    
+    summary(x2207.Anova.SVL.car.NF58.females)
+    plot(x2207.Anova.SVL.car.NF58.females) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  # Not necessary
+  
+    # Table to show sample sizes across treatments for NF58 females
+      print(x2207.physio.df.SVLNEO.NF58.females %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## (Females Only) NF58 ANOVA Table for aov(SVL ~ Block + Treatment), Type III
+```{r 28 chunk SVL ANOVA NF 58 Females table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF58.females) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF58.females) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF58.females, digits = 3)
+```
+## ANOVA for NF62 SVL between Treatments with Sex 
+```{r 29 chunk SVL ANOVA NF 62, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF62 <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "62")
+x2207.physio.df.SVLNEO.NF62$Sex <- as.factor(x2207.physio.df.SVLNEO.NF62$Sex)
+x2207.physio.df.SVLNEO.NF62$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF62$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF62$SVL, x2207.physio.df.SVLNEO.NF62$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF62 <- aov(SVL~ Block + Sex*Treatment, data=x2207.physio.df.SVLNEO.NF62)
+    x2207.III.SVL.ANOVA.NF62 <- Anova(x2207.Anova.SVL.car.NF62, type = "III")
+    x2207.III.SVL.ANOVA.NF62 
+    
+    summary(x2207.Anova.SVL.car.NF62)
+    plot(x2207.Anova.SVL.car.NF62) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.SVL.car.NF62, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs)
+  
+    # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.SVLNEO.NF62 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF62 ANOVA Table for aov(SVL ~ Block + Sex * Treatment), Type III
+```{r 30 chunk SVL ANOVA NF 62 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF62) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF62) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF62, digits = 3)
+
+```
+## ANOVA for NF66 SVL between Treatments with Sex 
+```{r 31 chunk SVL ANOVA NF 66, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF66 <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "66")
+x2207.physio.df.SVLNEO.NF66$Sex <- as.factor(x2207.physio.df.SVLNEO.NF66$Sex)
+x2207.physio.df.SVLNEO.NF66$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF66$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF66$SVL, x2207.physio.df.SVLNEO.NF66$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF66 <- aov(SVL~ Block + Sex*Treatment, data=x2207.physio.df.SVLNEO.NF66)
+    x2207.III.SVL.ANOVA.NF66 <- Anova(x2207.Anova.SVL.car.NF66, type = "III")
+    x2207.III.SVL.ANOVA.NF66 
+    
+    summary(x2207.Anova.SVL.car.NF66)
+    plot(x2207.Anova.SVL.car.NF66)  
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.SVL.car.NF66, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) 
+  
+    # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.SVLNEO.NF66 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+      
+##Checking if point 48 producing heterosk issues -- conclusion, looking at the levene test it was contributing to heterosk, but excluding it did not change the overall findings of the ANOVA Type III. So choosing to report the one including data.
+x2207.physio.df.SVLNEO.NF66.HI <- x2207.physio.df.SVLNEO.NF66[-c(48), ]
+
+ leveneTest(x2207.physio.df.SVLNEO.NF66.HI$SVL, x2207.physio.df.SVLNEO.NF66.HI$Treatment, center=median) #non-significant 
+  
+    x2207.physio.df.SVLNEO.NF66.HI$Sex <- as.factor(x2207.physio.df.SVLNEO.NF66.HI$Sex)
+    x2207.physio.df.SVLNEO.NF66.HI$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF66.HI$Treatment) 
+    
+    x2207.Anova.SVL.car.NF66.HI <- aov(SVL~ Block + Sex*Treatment, data=x2207.physio.df.SVLNEO.NF66.HI)
+    x2207.III.SVL.ANOVA.NF66.HI <- Anova(x2207.Anova.SVL.car.NF66.HI, type = "III")
+    x2207.III.SVL.ANOVA.NF66.HI 
+    
+    summary(x2207.Anova.SVL.car.NF66.HI)
+    plot(x2207.Anova.SVL.car.NF66.HI) 
+
+    summary.lm(x2207.Anova.SVL.car.NF66.HI)
+    postHocs.HI <- glht(x2207.Anova.SVL.car.NF66.HI, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs.HI) 
+  
+    print(x2207.physio.df.SVLNEO.NF66.HI %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21) 
+
+```
+## NF66 ANOVA Table for aov(SVL ~ Block + Sex * Treatment), Type III
+```{r 32 chunk SVL ANOVA NF 66 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF66) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF66) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF66, digits = 3)
+
+```
+## (Males Only) ANOVA for NF66 SVL between Treatments
+```{r 33 chunk SVL ANOVA NF 66 Males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF66.males <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "66") %>%
+  filter(Sex == "Male")
+x2207.physio.df.SVLNEO.NF66.males$Sex <- as.factor(x2207.physio.df.SVLNEO.NF66.males$Sex)
+x2207.physio.df.SVLNEO.NF66.males$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF66.males$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF66.males$SVL, x2207.physio.df.SVLNEO.NF66.males$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF66.males <- aov(SVL~ Block + Treatment, data=x2207.physio.df.SVLNEO.NF66.males)
+    x2207.III.SVL.ANOVA.NF66.males <- Anova(x2207.Anova.SVL.car.NF66.males, type = "III")
+    x2207.III.SVL.ANOVA.NF66.males
+    
+    summary(x2207.Anova.SVL.car.NF66.males)
+    plot(x2207.Anova.SVL.car.NF66.males)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  # Not necessary
+  
+    # Table to show sample sizes by sex across treatments for NF58
+      print(x2207.physio.df.SVLNEO.NF66.males %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+      
+##Checking again if point 48 producing heterosk issues -- and assessing outcome when removed
+x2207.physio.df.SVLNEO.NF66.HI.males <- x2207.physio.df.SVLNEO.NF66.HI %>%
+  filter(Sex == "Male")
+x2207.physio.df.SVLNEO.NF66.HI.males$Sex <- as.factor(x2207.physio.df.SVLNEO.NF66.HI.males$Sex)
+x2207.physio.df.SVLNEO.NF66.HI.males$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF66.HI.males$Treatment) 
+leveneTest(x2207.physio.df.SVLNEO.NF66.HI.males$SVL, x2207.physio.df.SVLNEO.NF66.HI.males$Treatment, center=median)
+x2207.Anova.SVL.car.NF66.HI.males <- aov(SVL~ Block + Treatment, data=x2207.physio.df.SVLNEO.NF66.HI.males)
+    x2207.III.SVL.ANOVA.NF66.HI.males <- Anova(x2207.Anova.SVL.car.NF66.HI.males, type = "III")
+    x2207.III.SVL.ANOVA.NF66.HI.males 
+    summary(x2207.Anova.SVL.car.NF66.HI.males)
+    plot(x2207.Anova.SVL.car.NF66.HI.males) 
+    print(x2207.physio.df.SVLNEO.NF66.HI.males %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+```
+## (Males Only) NF66 ANOVA Table for aov(SVL ~ Block + Treatment), Type III
+```{r 34 chunk SVL ANOVA NF 66 Males table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF66.males) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF66.males) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF66.males, digits = 3)
+```
+## (Femles Only) ANOVA for NF66 SVL between Treatments
+```{r 35 chunk SVL ANOVA NF 66 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.SVLNEO.NF66.females <- x2207.physio.df.SVLNEO %>%
+  filter(NF_Stage == "66") %>%
+  filter(Sex == "Female")
+x2207.physio.df.SVLNEO.NF66.females$Sex <- as.factor(x2207.physio.df.SVLNEO.NF66.females$Sex)
+x2207.physio.df.SVLNEO.NF66.females$Treatment <- as.factor(x2207.physio.df.SVLNEO.NF66.females$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.SVLNEO.NF66.females$SVL, x2207.physio.df.SVLNEO.NF66.females$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.SVL.car.NF66.females <- aov(SVL~ Block + Treatment, data=x2207.physio.df.SVLNEO.NF66.females)
+    x2207.III.SVL.ANOVA.NF66.females <- Anova(x2207.Anova.SVL.car.NF66.females, type = "III")
+    x2207.III.SVL.ANOVA.NF66.females 
+    
+    summary(x2207.Anova.SVL.car.NF66.females)
+    plot(x2207.Anova.SVL.car.NF66.females) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  # Not necessary
+  
+    # Table to show sample sizes by sex across treatments for NF58
+      print(x2207.physio.df.SVLNEO.NF66.females %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+      
+```
+## (Females Only) NF66 ANOVA Table for aov(SVL ~ Block + Treatment), Type III
+```{r 36 chunk SVL ANOVA NF 66 Females table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.SVL.ANOVA.NF66.females) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.SVL.ANOVA.NF66.females) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.SVL.ANOVA.NF66.females, digits = 3)
+```
+
+
+# SMI (Outlier assessment, Visualization, ANOVAs, Assumption checking, Post-hoc analysis)
+## QA/QC and exclusion of extreme outliers for SMI
+```{r 37 chunk SMI QA/QC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Constructing dataframe to define upper and lower bounds for outlier exclusion
+x2207.physio.df.smiNEO <- x2207.physio.df %>%
+  group_by(Treatment, NF_Stage, Sex) %>% 
+  filter(Sex == "Male" | Sex == "Female") %>%
+  dplyr::summarize(q1 = quantile(smi, 0.25, na.rm=TRUE),
+            mean = mean(smi),
+            q3 = quantile(smi, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upper_smi = (q3 + ((3)*IQR))) %>%
+  mutate(lower_smi = (q1 - ((3)*IQR))) %>%
+  dplyr::select(Treatment, NF_Stage, Sex, upper_smi, lower_smi)
+
+# str(x2207.physio.df) # indicates n=215 prior to exclusions
+
+# Joining to add in upper and lower bounds for outliers detection
+x2207.physio.df.smiBounds <- left_join(x2207.physio.df, x2207.physio.df.smiNEO, by=c("Treatment", "NF_Stage", "Sex"))
+
+# Dataframe that excludes extreme outliers based on upper and lower bounds calculated lines 342-351
+x2207.physio.df.smiBounds.NO2 <- x2207.physio.df.smiBounds %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  filter(smi < upper_smi, smi > lower_smi) %>%
+  mutate(Functional_Group = case_when(Treatment == 'Control' ~ 'Control',
+                           Treatment == 'PFOS' | Treatment == 'PFHxS' ~'Sulfonate',
+                          Treatment == 'PFOA' | Treatment == 'PFHxA' ~ 'Carboxylate',
+                          Treatment == 'MIX' ~ "Mixture"))
+
+# Dataframe went from n=215 to n=XXX, excluding 4 replicates (3 of which were samples that either failed to have sex determined or was a mortality)
+# str(x2207.physio.df.smiBounds.NO2) 
+
+# Table indicates that after exclusions, the sex number ranges n=3-9 per treatment and developmental stage
+print(x2207.physio.df.smiBounds.NO2 %>%
+        group_by(Treatment, NF_Stage, Sex) %>%
+        summarize(Freq=n()), n=40)
+
+# Setting order of levels for treatment for ease of visualization purposes
+x2207.physio.df.smiBounds.NO2$Treatment <- factor(x2207.physio.df.smiBounds.NO2$Treatment, levels=c("Control", "PFHxA", "PFOA", "PFHxS", "PFOS", "MIX"))
+
+x2207.physio.df.smiBounds.NO2$Functional_Group <- factor(x2207.physio.df.smiBounds.NO2$Functional_Group, levels=c("Control", "Carboxylate", "Sulfonate", "Mixture"))
+
+#For the sake of not hard-recoding figures, renaming dataframe that has excluded replicates based on 3xIQR 
+x2207.physio.df.smiNEO <- x2207.physio.df.smiBounds.NO2
+```
+## Visualization for SMI
+```{r 38 chunk SMI Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Creating linear model for visualizing SMI across developmental stages
+SmivsTreatment <-  lm(smi ~ Treatment + NF_Stage, data = x2207.physio.df.smiNEO)
+SmivsTreatment_means <- emmeans(SmivsTreatment, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+SmivsTreatment_means_dataframe <- data.frame(SmivsTreatment_means)  # assigning to dataframe
+
+#Plotting the mean SMI by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.smi.figure <- ggplot(data = x2207.physio.df.smiNEO, aes(x = Treatment, y = smi, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = SmivsTreatment_means_dataframe, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = SmivsTreatment_means_dataframe, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(x=NULL, y="SMI (g)") +
+        scale_y_continuous(breaks = seq(0.3, 1.2, 0.20), limits = c(0.25, 1.2)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "bottom")
+x2207.smi.figure
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+## ANOVA for SMI between Treatments with Sex (all NF stages)
+```{r 39 chunk SMI ANOVA All NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO$NF_Stage <- factor(x2207.physio.df.smiNEO$NF_Stage, levels = c("58", "62", "66"))
+x2207.physio.df.smiNEO$Block <- as.factor(x2207.physio.df.smiNEO$Block)
+x2207.physio.df.smiNEO$Sex <- as.factor(x2207.physio.df.smiNEO$Sex)
+x2207.physio.df.smiNEO$Treatment <- as.factor(x2207.physio.df.smiNEO$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO$smi, x2207.physio.df.smiNEO$Treatment, center=median)
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing, and setting orthogonal for developmental stage
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.smiNEO$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+
+  #Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car <- aov(smi~ Block + Sex*NF_Stage*Treatment, data=x2207.physio.df.smiNEO)
+    x2207.III.smi.ANOVA <- Anova(x2207.Anova.smi.car, type = "III")
+    x2207.III.smi.ANOVA #Notable, a three-way interaction indicates the need to break down to two way anova on the basis of sex to tease apart what's happening. 
+    summary(x2207.Anova.smi.car)
+    plot(x2207.Anova.smi.car) #Also the heteroskedasicity seems apparent, so that source may be related to NF stage, and may be then more appropriate to analyse by developmental stage
+
+#Step 5 -- Compute post-hoc tests 
+  # Not appropriate due to three-way interaction
+
+```
+## ANOVA Table for aov(SMI ~ Block + Sex * NF Stage * Treatment), Type III
+```{r 40 chunk ANOVA SMI table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA) <- c("(Intercept)", "Block", "Sex", "NF Stage", "PFAS", "Sex:NF Stage", "Sex:PFAS", "NF Stage:PFAS", "Sex:NF Stage:PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA, digits = 3)
+
+```
+## ANOVA for NF58 SMI between Treatments with Sex 
+```{r 41 chunk SMI ANOVA NF 58, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF58 <- x2207.physio.df.smiNEO %>%
+  filter(NF_Stage == "58")
+x2207.physio.df.smiNEO.NF58$Sex <- as.factor(x2207.physio.df.smiNEO.NF58$Sex)
+x2207.physio.df.smiNEO.NF58$Treatment <- as.factor(x2207.physio.df.smiNEO.NF58$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF58$smi, x2207.physio.df.smiNEO.NF58$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF58 <- aov(smi~ Block + Sex*Treatment, data=x2207.physio.df.smiNEO.NF58)
+    x2207.III.smi.ANOVA.NF58 <- Anova(x2207.Anova.smi.car.NF58, type = "III")
+    x2207.III.smi.ANOVA.NF58 
+    
+    summary(x2207.Anova.smi.car.NF58)
+    plot(x2207.Anova.smi.car.NF58)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.smi.car.NF58, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) 
+  
+    # Table to show sample sizes by sex across treatments for NF58
+      print(x2207.physio.df.smiNEO.NF58 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF58 ANOVA Table for aov(SMI ~ Block + Sex * Treatment), Type III
+```{r 42 chunk SMI ANOVA NF 58 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF58) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF58) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF58, digits = 3)
+
+```
+## ANOVA for NF62 SMI between Treatments with Sex 
+```{r 43 chunk SMI ANOVA NF 62, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF62 <- x2207.physio.df.smiNEO %>%
+  filter(NF_Stage == "62")
+x2207.physio.df.smiNEO.NF62$Sex <- as.factor(x2207.physio.df.smiNEO.NF62$Sex)
+x2207.physio.df.smiNEO.NF62$Treatment <- as.factor(x2207.physio.df.smiNEO.NF62$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF62$smi, x2207.physio.df.smiNEO.NF62$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF62 <- aov(smi~ Block + Sex*Treatment, data=x2207.physio.df.smiNEO.NF62)
+    x2207.III.smi.ANOVA.NF62 <- Anova(x2207.Anova.smi.car.NF62, type = "III")
+    x2207.III.smi.ANOVA.NF62 
+    
+    summary(x2207.Anova.smi.car.NF62)
+    plot(x2207.Anova.smi.car.NF62) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.smi.car.NF62, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs) #No significant signals from the dunnett, but with potential covariate interaction (<0.1) warning, may be prudent to assessing deeper through analyzing by sex
+  
+    # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.smiNEO.NF62 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF62 ANOVA Table for aov(SMI ~ Block + Sex * Treatment), Type III
+```{r 44 chunk SMI ANOVA NF 62 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF62) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF62) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF62, digits = 3)
+
+```
+
+## (Males Only) ANOVA for NF62 SMI between Treatments
+```{r 45 chunk SMI ANOVA NF 62 Males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF62.males <- x2207.physio.df.smiNEO.NF62 %>%
+  filter(Sex == "Male")
+x2207.physio.df.smiNEO.NF62.males$Treatment <- as.factor(x2207.physio.df.smiNEO.NF62.males$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF62.males$smi, x2207.physio.df.smiNEO.NF62.males$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF62.males <- aov(smi~ Block + Treatment, data=x2207.physio.df.smiNEO.NF62.males)
+    x2207.III.smi.ANOVA.NF62.males <- Anova(x2207.Anova.smi.car.NF62.males, type = "III")
+    x2207.III.smi.ANOVA.NF62.males
+    
+    summary(x2207.Anova.smi.car.NF62.males)
+    plot(x2207.Anova.smi.car.NF62.males)  
+    #Looking at this need to exclude data point 13 and re-assess based on cook's distance
+
+    #Males subbed out excluding outlier (point 13) via cook's distance
+    x2207.physio.df.smiNEO.NF62.males.N13 <- x2207.physio.df.smiNEO.NF62.males[-c(13), ]
+    x2207.Anova.smi.car.NF62.males.N13 <- aov(smi~ Block + Treatment, data=x2207.physio.df.smiNEO.NF62.males.N13)
+    x2207.III.smi.ANOVA.NF62.males.N13 <- Anova(x2207.Anova.smi.car.NF62.males.N13, type = 3) 
+    x2207.III.smi.ANOVA.NF62.males.N13 #Normality assumption quality decline with exclusion and functionally does not change outcome. Retain datapoint.
+    summary(x2207.Anova.smi.car.NF62.males.N13)
+    plot(x2207.Anova.smi.car.NF62.males.N13) 
+    
+#Step 5 -- Compute contrasts or post-hoc tests 
+    #Not necessary
+   
+  # Table to show sample sizes across treatments for NF62 males
+    print(x2207.physio.df.smiNEO.NF62.males %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+    
+
+
+    
+```
+
+## (Males Only) NF62 ANOVA Table for aov(SMI ~ Block + Treatment), Type III
+```{r 46 chunk SMI ANOVA NF 58 Males table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF62.males) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF62.males) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF62.males, digits = 3)
+```
+## (Females Only) ANOVA for NF62 SMI between Treatments
+```{r 47 chunk SMI ANOVA NF 62 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF62.females <- x2207.physio.df.smiNEO.NF62 %>%
+  filter(Sex == "Female")
+x2207.physio.df.smiNEO.NF62.females$Treatment <- as.factor(x2207.physio.df.smiNEO.NF62.females$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF62.females$smi, x2207.physio.df.smiNEO.NF62.females$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF62.females <- aov(smi~ Block + Treatment, data=x2207.physio.df.smiNEO.NF62.females)
+    x2207.III.smi.ANOVA.NF62.females <- Anova(x2207.Anova.smi.car.NF62.females, type = "III")
+    x2207.III.smi.ANOVA.NF62.females
+    
+    summary(x2207.Anova.smi.car.NF62.females)
+    plot(x2207.Anova.smi.car.NF62.females) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs.NF62.females <- glht(x2207.Anova.smi.car.NF62.females, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs.NF62.females)
+  
+    # Table to show sample sizes across treatments for NF62 females
+      print(x2207.physio.df.smiNEO.NF62.females %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## (Females Only) NF62 ANOVA Table for aov(SMI ~ Block + Treatment), Type III
+```{r 48 chunk SVL ANOVA NF 62 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF62.females) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF62.females) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF62.females, digits = 3)
+
+```
+## (Females Only) NF62 Post-hoc Table for aov(SMI ~ Block + Treatment), Type III
+```{r 49 chunk SVL sex dunnet  post hoc table set up, echo = FALSE, include=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.NF62.females)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.NF62.females))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("PFHxA-Control","PFOA-Control", "PFHxS-Control", "PFOS-Control", "MIX-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+
+```
+```{r 50 chunk SVL sex post hoc table 2, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.smi.NF62.females <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.smi.NF62.females
+
+```
+## ANOVA for NF66 SMI between Treatments with Sex 
+```{r 51 chunk SMI ANOVA NF 66, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF66 <- x2207.physio.df.smiNEO %>%
+  filter(NF_Stage == "66")
+x2207.physio.df.smiNEO.NF66$Sex <- as.factor(x2207.physio.df.smiNEO.NF66$Sex)
+x2207.physio.df.smiNEO.NF66$Treatment <- as.factor(x2207.physio.df.smiNEO.NF66$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF66$smi, x2207.physio.df.smiNEO.NF66$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF66 <- aov(smi~ Block + Sex*Treatment, data=x2207.physio.df.smiNEO.NF66)
+    x2207.III.smi.ANOVA.NF66 <- Anova(x2207.Anova.smi.car.NF66, type = "III")
+    x2207.III.smi.ANOVA.NF66 # signal in different SMI by sex
+    
+    summary(x2207.Anova.smi.car.NF66)
+    plot(x2207.Anova.smi.car.NF66)  
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs <- glht(x2207.Anova.smi.car.NF66, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs)
+  
+    # Table to show sample sizes by sex across treatments for NF62
+      print(x2207.physio.df.smiNEO.NF66 %>%
+        group_by(Treatment, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## NF66 ANOVA Table for aov(SMI ~ Block + Sex * Treatment), Type III
+```{r 52 chunk SMI ANOVA NF 66 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF66) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF66) <- c("(Intercept)", "Block", "Sex", "PFAS", "Sex:PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF66, digits = 3)
+
+```
+## (Males Only) ANOVA for NF66 SMI between Treatments
+```{r 53 chunk SMI ANOVA NF 66 Males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF66.males <- x2207.physio.df.smiNEO.NF66 %>%
+  filter(Sex == "Male")
+x2207.physio.df.smiNEO.NF66.males$Treatment <- as.factor(x2207.physio.df.smiNEO.NF66.males$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF66.males$smi, x2207.physio.df.smiNEO.NF66.males$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF66.males <- aov(smi~ Block + Treatment, data=x2207.physio.df.smiNEO.NF66.males)
+    x2207.III.smi.ANOVA.NF66.males <- Anova(x2207.Anova.smi.car.NF66.males, type = "III")
+    x2207.III.smi.ANOVA.NF66.males 
+    
+    summary(x2207.Anova.smi.car.NF66.males)
+    plot(x2207.Anova.smi.car.NF66.males) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    postHocs.NF66.males.smi <- glht(x2207.Anova.smi.car.NF66.males, linfct=mcp(Treatment = "Dunnett"))
+    summary(postHocs.NF66.males.smi)
+   
+  # Table to show sample sizes across treatments for NF62 males
+    print(x2207.physio.df.smiNEO.NF66.males %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## (Males Only) NF66 ANOVA Table for aov(SMI ~ Block + Treatment), Type III
+```{r 54 chunk SMI ANOVA NF 58 Males table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF66.males) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF66.males) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF66.males, digits = 3)
+```
+## (Males Only) NF66 Post-hoc Table for aov(SMI ~ Block + Treatment), Type III
+```{r 55 chunk smi NF66 males dunnet  post hoc table set up, echo = FALSE, include=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.NF66.males.smi)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.NF66.males.smi))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("PFHxA-Control","PFOA-Control", "PFHxS-Control", "PFOS-Control", "MIX-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+```
+```{r 56 chunk SMI NF66 males post hoc table 2, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.smi.NF66.males <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.smi.NF66.males
+
+```
+## (Females Only) ANOVA for NF66 SMI between Treatments
+```{r 57 chunk SMI ANOVA NF 66 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.smiNEO.NF66.females <- x2207.physio.df.smiNEO.NF66 %>%
+  filter(Sex == "Female")
+leveneTest(x2207.physio.df.smiNEO.NF66.females$smi, x2207.physio.df.smiNEO.NF66.females$Treatment, center=median) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.smiNEO.NF66.females$smi, x2207.physio.df.smiNEO.NF66.females$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.smi.car.NF66.females <- aov(smi~ Block + Treatment, data=x2207.physio.df.smiNEO.NF66.females)
+    x2207.III.smi.ANOVA.NF66.females <- Anova(x2207.Anova.smi.car.NF66.females, type = "III")
+    x2207.III.smi.ANOVA.NF66.females
+    
+    summary(x2207.Anova.smi.car.NF66.females)
+    plot(x2207.Anova.smi.car.NF66.females) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    postHocs.NF <- glht(x2207.Anova.smi.car.NF66.females, linfct=mcp(Treatment = "Dunnett"))
+    summary(postHocs)
+  
+    # Table to show sample sizes across treatments for NF58 females
+      print(x2207.physio.df.smiNEO.NF66.females %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+## (Females Only) NF66 ANOVA Table for aov(SMI ~ Block + Treatment), Type III
+```{r 58 chunk SMI ANOVA NF 66 Females table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.smi.ANOVA.NF66.females) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.smi.ANOVA.NF66.females) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.smi.ANOVA.NF66.females, digits = 3)
+```
+
+
+# SHI (Outlier assessment, Visualization, ANOVAs, Assumption checking, Post-hoc analysis)
+
+## QA/QC and exclusion of extreme outliers for SMI
+```{r 59 chunk SHI QA/QC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Constructing dataframe to define upper and lower bounds for outlier exclusion
+x2207.physio.df.sum <- x2207.physio.df %>%
+  group_by(Treatment, NF_Stage, Sex) %>% 
+  filter(Sex == "Male" | Sex == "Female") %>%
+  dplyr::summarize(q1 = quantile(shi, 0.25, na.rm=TRUE),
+            mean = mean(shi),
+            q3 = quantile(shi, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upper_shi = (q3 + ((2)*IQR))) %>%
+  mutate(lower_shi = (q1 - ((2)*IQR))) %>%
+  dplyr::select(Treatment, NF_Stage, Sex, upper_shi, lower_shi)
+
+# str(x2207.physio.df) # indicates n=215 prior to exclusions
+
+# Joining to add in upper and lower bounds for outliers detection
+x2207.physio.df.shiBounds <- left_join(x2207.physio.df, x2207.physio.df.sum, by=c("Treatment", "NF_Stage", "Sex"))
+
+# Dataframe that excludes extreme outliers based on upper and lower bounds calculated
+x2207.physio.df.shiBounds.NO2 <- x2207.physio.df.shiBounds %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  filter(shi < upper_shi, shi > lower_shi) %>%
+  mutate(Functional_Group = case_when(Treatment == 'Control' ~ 'Control',
+                           Treatment == 'PFOS' | Treatment == 'PFHxS' ~'Sulfonate',
+                          Treatment == 'PFOA' | Treatment == 'PFHxA' ~ 'Carboxylate',
+                          Treatment == 'MIX' ~ "Mixture"))
+
+# Dataframe went from n=215 to n=XXX, excluding 4 replicates (3 of which were samples that either failed to have sex determined or was a mortality)
+# str(x2207.physio.df.smiBounds.NO2) 
+
+# Table indicates that after exclusions, the sex number ranges n=X-9 per treatment and developmental stage
+print(x2207.physio.df.shiBounds.NO2 %>%
+        group_by(Treatment, NF_Stage, Sex) %>%
+        summarize(Freq=n()), n=21)
+
+# Setting order of levels for treatment for ease of visualization purposes
+x2207.physio.df.shiBounds.NO2$Treatment <- factor(x2207.physio.df.shiBounds.NO2$Treatment, levels=c("Control", "PFHxA", "PFOA", "PFHxS", "PFOS", "MIX"))
+
+x2207.physio.df.shiBounds.NO2$Functional_Group <- factor(x2207.physio.df.shiBounds.NO2$Functional_Group, levels=c("Control", "Carboxylate", "Sulfonate", "Mixture"))
+
+```
+## Visualization for SHI (all)
+```{r 60 chunk SHI Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Creating linear model for visualizing mass across developmental stages
+shivsTreatment <-  lm(shi ~ Treatment + NF_Stage, data = x2207.physio.df.shiBounds.NO2)
+shivsTreatment_means <- emmeans(shivsTreatment, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+shivsTreatment_means_dataframe <- data.frame(shivsTreatment_means)  # assigning to dataframe
+
+#Plotting the mean mass by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.shi.figure <- ggplot(data = x2207.physio.df.shiBounds.NO2, aes(x = Treatment, y = shi, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = shivsTreatment_means_dataframe, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = shivsTreatment_means_dataframe, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Males & Females", x=NULL, y="SHI") +
+        scale_y_continuous(breaks = seq(3, 15, 1), limits = c(3, 15)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14)) 
+x2207.shi.figure
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+## Visualization for SHI (Males)
+```{r 61 chunk SHI males Visualization, warning=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+x2207.physio.df.males <- x2207.physio.df.shiBounds.NO2 %>%
+  filter(Sex == "Male")
+
+print(x2207.physio.df.males %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+
+# Creating linear model for visualizing mass across developmental stages
+shivsTreatment.males <-  lm(shi ~ Treatment + NF_Stage, data = x2207.physio.df.males) 
+shivsTreatment_means.males <- emmeans(shivsTreatment.males, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+shivsTreatment_means_dataframe.males <- data.frame(shivsTreatment_means.males)  # assigning to dataframe
+
+#Plotting the mean mass by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.shi.figure.males <- ggplot(data = x2207.physio.df.males, aes(x = Treatment, y = shi, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = shivsTreatment_means_dataframe.males, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = shivsTreatment_means_dataframe.males, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Males", x=NULL, y="SHI (mg)") +
+        scale_y_continuous(breaks = seq(3, 13, 1), limits = c(3, 13)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+x2207.shi.figure.males
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+## Visualization for SHI (Females)
+```{r 62 chunk SHI females Visualization, warning=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+x2207.physio.df.females <- x2207.physio.df.shiBounds.NO2 %>%
+  filter(Sex == "Female")
+
+print(x2207.physio.df.females %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+
+# Creating linear model for visualizing mass across developmental stages
+shivsTreatment.females <-  lm(shi ~ Treatment + NF_Stage, data = x2207.physio.df.females) 
+shivsTreatment_means.females <- emmeans(shivsTreatment.females, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+shivsTreatment_means_dataframe.females <- data.frame(shivsTreatment_means.females)  # assigning to dataframe
+
+#Plotting the mean mass by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.shi.figure.females <- ggplot(data = x2207.physio.df.females, aes(x = Treatment, y = shi, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = shivsTreatment_means_dataframe.females, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = shivsTreatment_means_dataframe.females, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Females", x=NULL, y="SHI (mg)") +
+        scale_y_continuous(breaks = seq(3, 14, 1), limits = c(3, 14)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+x2207.shi.figure.females
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+
+## ANOVA for SHI between Treatments with Sex (all NF stages)
+```{r 63 chunk SHI ANOVA All NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.shiBounds.NO2$Sex <- as.factor(x2207.physio.df.shiBounds.NO2$Sex)
+x2207.physio.df.shiBounds.NO2$Treatment <- as.factor(x2207.physio.df.shiBounds.NO2$Treatment)
+x2207.physio.df.shiBounds.NO2$Block <- as.factor(x2207.physio.df.shiBounds.NO2$Block)
+x2207.physio.df.shiBounds.NO2$NF_Stage <- factor(x2207.physio.df.shiBounds.NO2$NF_Stage, levels = c("58", "62", "66"))
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.shiBounds.NO2$shi, x2207.physio.df.shiBounds.NO2$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing, and setting orthogonal for developmental stage
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.shiBounds.NO2$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car <- aov(shi~ Block + Sex*NF_Stage*Treatment, data=x2207.physio.df.shiBounds.NO2)
+    x2207.III.shi.ANOVA <- Anova(x2207.Anova.shi.car, type = "III")
+    x2207.III.shi.ANOVA
+    
+    summary(x2207.Anova.shi.car)
+    plot(x2207.Anova.shi.car)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  # Not appropriate due to significant three-way interaction
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.shiBounds.NO2 %>%
+        group_by(Treatment, Sex, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+      
+```
+
+## ANOVA Table for aov(SHI ~ Block + Sex * NF Stage * Treatment), Type III
+```{r 64 chunk ANOVA SMI table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA) <- c("(Intercept)", "Block", "Sex", "NF Stage", "PFAS", "Sex:NF Stage", "Sex:PFAS", "NF Stage:PFAS", "Sex:NF Stage:PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA, digits = 3)
+```
+
+
+## (Males Only) ANOVA for SHI between Treatments
+```{r 65 chunk SHI ANOVA Males, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.males <- x2207.physio.df.shiBounds.NO2 %>%
+  filter(Sex == "Male")
+
+x2207.physio.df.males$NF_Stage <- factor(x2207.physio.df.males$NF_Stage, levels = c("58", "62", "66"))
+x2207.physio.df.males$Block <- as.factor(x2207.physio.df.males$Block)
+x2207.physio.df.males$Treatment <- as.factor(x2207.physio.df.males$Treatment)
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.males$shi, x2207.physio.df.males$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing, and setting orthogonal for developmental stage
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.males$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car.male <- aov(shi~ Block + NF_Stage*Treatment, data=x2207.physio.df.males)
+    x2207.III.shi.ANOVA.male  <- Anova(x2207.Anova.shi.car.male, type = "III")
+    x2207.III.shi.ANOVA.male 
+    
+    summary(x2207.Anova.shi.car.male)
+    plot(x2207.Anova.shi.car.male)
+    
+    summary.lm(x2207.Anova.shi.car.male) 
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs.male.shi <- glht(x2207.Anova.shi.car.male , linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs.male.shi) #this dunnett shows that significant differences for PFOS treatment
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.males %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+```
+
+## (Males Only) ANOVA Table for aov(SHI ~ Block + Treatment), Type III
+```{r 66 chunk SHI ANOVA Males table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA.male) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA.male) <- c("(Intercept)", "Block", "NF Stage", "PFAS", "NF Stage:PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA.male, digits = 3)
+```
+
+## (Males Only) Post-hoc Table for aov(SHI ~ Block + Treatment), Type III
+```{r 67 chunk SHI Males dunnet  post hoc table set up, echo = FALSE, include=FALSE, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Setting up table code necessary to create table with glht object with post-hoc results 
+#Utilizing this code written by ajpelu/table_glht.r to convert a glht object from a lme to a table format, then I am coercing it into a dataframe to reformat it
+str(postHocs.male.shi)
+table_glht <- function(x) {
+  pq <- summary(x)$test
+  mtests <- cbind(pq$coefficients, pq$sigma, pq$tstat, pq$pvalues)
+  error <- attr(pq$pvalues, "error")
+  pname <- switch(x$alternativ, less = paste("Pr(<", ifelse(x$df ==0, "z", "t"), ")", sep = ""), 
+  greater = paste("Pr(>", ifelse(x$df == 0, "z", "t"), ")", sep = ""), two.sided = paste("Pr(>|",ifelse(x$df == 0, "z", "t"), "|)", sep = ""))
+  colnames(mtests) <- c("Estimate", "Std. Error", ifelse(x$df ==0, "z value", "t value"), pname)
+  return(mtests)
+
+}
+
+postHoc.df <- as.data.frame(table_glht(postHocs.male.shi))
+str(postHoc.df)
+
+
+#using this function by jeromy anglim on tumblr to round variables in my dataframe
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x}
+
+postHoc.df <- round_df(postHoc.df, 3)
+
+#now adding variable with labels for comparison so they print on a table
+postHoc.df$Comparison <- c("PFHxA-Control","PFOA-Control", "PFHxS-Control", "PFOS-Control", "MIX-Control") #manually adding variable with comparison to ensure it will print off with a table
+postHoc.df #checking comparisons match with original listed on left, which they do. Now to reorder variables and print table
+
+postHoc.df <- postHoc.df %>% 
+  mutate(`Pr(>|t|)` = replace(`Pr(>|t|)`, `Pr(>|t|)` == 0.000, "<0.001"))
+
+#now reordering dataframe columns so they are in order for the subsequent table
+colnames(postHoc.df)
+col_order <- c("Comparison", "Estimate", "Std. Error",
+               "t value", "Pr(>|t|)")
+postHoc.df <- postHoc.df[, col_order]
+postHoc.df
+
+
+```
+```{r 68 chunk SHI Males post hoc table 2, echo = FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+#Creating a table for Post-Hoc:
+postHocTable.shi.males <- postHoc.df %>%
+  gt() %>%
+  tab_header(title =md("**Dunnett Post-hoc Comparisons**"), subtitle = NULL, preheader = NULL) %>%
+  tab_options(column_labels.font.weight = 'normal', 
+              source_notes.font.size = 12, 
+              table.width = "90%",
+              column_labels.border.top.color= "grey",
+              column_labels.border.bottom.color= "grey") %>%
+  tab_style(style = list(
+    cell_text(font = "Times New Roman"), 
+    cell_borders(sides = c("top", "bottom"), color = "white")),
+    locations = list(cells_body(), cells_column_labels(), cells_title())) %>%
+  cols_label(Comparison = "Comparison",
+             Estimate = "Estimates",
+             `Std. Error` = "SE",
+             `t value` = "t value",
+             `Pr(>|t|)` = "p")
+postHocTable.shi.males
+
+```
+
+## (Females Only) ANOVA for SHI between Treatments
+```{r 69 chunk SHI ANOVA Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step 1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.females <- x2207.physio.df.shiBounds.NO2 %>%
+  filter(Sex == "Female")
+
+
+x2207.physio.df.females$NF_Stage <- factor(x2207.physio.df.females$NF_Stage, levels = c("58", "62", "66"))
+x2207.physio.df.females$Block <- as.factor(x2207.physio.df.females$Block)
+x2207.physio.df.females$Treatment <- as.factor(x2207.physio.df.females$Treatment)
+
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.females$shi, x2207.physio.df.females$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.females$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car.female <- aov(shi~ Block + NF_Stage*Treatment, data=x2207.physio.df.females)
+    x2207.III.shi.ANOVA.female  <- Anova(x2207.Anova.shi.car.female , type = "III")
+    x2207.III.shi.ANOVA.female 
+    
+    summary(x2207.Anova.shi.car.female)
+    plot(x2207.Anova.shi.car.female)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    #Not necessary
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.females %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+     
+    # Interaction plot for SHI of females  
+      x2207.SHIvsTreatment.females <-  lm(shi ~ Treatment+NF_Stage, data = x2207.physio.df.females)
+      SHI_Stage_InteractionPlot <- ggplot(NULL, aes(Treatment, shi, color=NF_Stage)) +
+          geom_point(data= x2207.SHIvsTreatment.females, size=1, alpha = 0.2, position = position_jitter(w=0.05)) +
+          stat_summary(data=x2207.physio.df.females, fun = mean, geom = "point", aes(group = NF_Stage), size = 3) +
+          stat_summary(data=x2207.physio.df.females, fun = mean, geom = "line", aes(group = NF_Stage)) +
+          scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+          stat_summary(data=x2207.physio.df.females, fun.data = mean_cl_boot, geom="errorbar", width=0.2, alpha = 0.8) +
+          labs(x = "\nTreatment", y="SHI (mg)", color = "NF_Stage") +
+          theme_classic(base_size = 16)
+      SHI_Stage_InteractionPlot
+```
+
+## (Females Only) ANOVA Table for aov(SHI ~ Block + Treatment), Type III
+```{r 70 chunk SHI ANOVA table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA.female) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA.female) <- c("(Intercept)", "Block", "NF Stage", "PFAS", "NF Stage:PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA.female, digits = 3)
+
+```
+
+## (Females Only) ANOVA for NF58 SHI between Treatments
+```{r 71 chunk SHI ANOVA NF 58 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.females.58 <- x2207.physio.df.females %>%
+  filter(NF_Stage == "58")
+x2207.physio.df.females.58$Block <- as.factor(x2207.physio.df.females.58$Block)
+ x2207.physio.df.females.58$Treatment <- as.factor(x2207.physio.df.females.58$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.females.58$shi, x2207.physio.df.females.58$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car.female.58 <- aov(shi~ Block + Treatment, data=x2207.physio.df.females.58)
+    x2207.III.shi.ANOVA.female.58  <- Anova(x2207.Anova.shi.car.female.58, type = "III")
+    x2207.III.shi.ANOVA.female.58
+    
+    summary(x2207.Anova.shi.car.female.58)
+    plot(x2207.Anova.shi.car.female.58)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+   #Not necessary
+  
+    # Table to show sample sizes across treatments for NF62 females
+      print(x2207.physio.df.females.58 %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+
+## (Females Only) NF58 ANOVA Table for aov(SHI ~ Block + Treatment), Type III
+```{r 72 chunk SHI ANOVA NF 58 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA.female.58) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA.female.58) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA.female.58, digits = 3)
+```
+
+## (Females Only) ANOVA for NF62 SHI between Treatments
+```{r 73 chunk SHI ANOVA NF 62 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.females.62 <- x2207.physio.df.females %>%
+  filter(NF_Stage == "62")
+x2207.physio.df.females.62$Block <- as.factor(x2207.physio.df.females.62$Block)
+x2207.physio.df.females.62$Treatment <- as.factor(x2207.physio.df.females.62$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.females.62$shi, x2207.physio.df.females.62$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car.female.62 <- aov(shi~ Block + Treatment, data=x2207.physio.df.females.62)
+    x2207.III.shi.ANOVA.female.62  <- Anova(x2207.Anova.shi.car.female.62, type = "III")
+    x2207.III.shi.ANOVA.female.62
+    
+    summary(x2207.Anova.shi.car.female.62)
+    plot(x2207.Anova.shi.car.female.62)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+  postHocs.female.shi.62 <- glht(x2207.Anova.shi.car.female.62, linfct=mcp(Treatment = "Dunnett"))
+  summary(postHocs.female.shi.62)
+  
+    # Table to show sample sizes across treatments for NF62 females
+      print(x2207.physio.df.females.62 %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+```
+
+## (Females Only) NF62 ANOVA Table for aov(SHI ~ Block + Treatment), Type III
+```{r 74 chunk SHI ANOVA NF 62 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA.female.62) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA.female.62) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA.female.62, digits = 3)
+```
+
+## (Females Only) ANOVA for NF66 SHI between Treatments
+```{r 75 chunk SHI ANOVA NF 66 Females, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.females.66 <- x2207.physio.df.females %>%
+  filter(NF_Stage == "66")
+x2207.physio.df.females.66$Block <- as.factor(x2207.physio.df.females.66$Block)
+x2207.physio.df.females.66$Treatment <- as.factor(x2207.physio.df.females.66$Treatment) 
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.females.66$shi, x2207.physio.df.females.66$Treatment, center=median)  #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.shi.car.female.66 <- aov(shi~ Block + Treatment, data=x2207.physio.df.females.66)
+    x2207.III.shi.ANOVA.female.66  <- Anova(x2207.Anova.shi.car.female.66, type = "III")
+    x2207.III.shi.ANOVA.female.66
+    
+    summary(x2207.Anova.shi.car.female.66)
+    plot(x2207.Anova.shi.car.female.66)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+   #Not necessary
+  
+    # Table to show sample sizes across treatments for NF62 females
+      print(x2207.physio.df.females.66 %>%
+        group_by(Treatment) %>%
+        summarize(Freq=n()), n=21)
+
+
+```
+
+## (Females Only) NF66 ANOVA Table for aov(SHI ~ Block + Treatment), Type III
+```{r 76 chunk SHI ANOVA NF 66 table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.shi.ANOVA.female.66) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.shi.ANOVA.female.66) <- c("(Intercept)", "Block", "PFAS", "Residuals")
+kable(x2207.III.shi.ANOVA.female.66, digits = 3)
+```
+
+BOOKMARK FOR CROSSREFERENCING
+
+# HSI (Outlier assessment, Visualization, ANOVAs, Assumption checking, Post-hoc analysis)
+
+Note, LSI (liver somatic index) and HSI (hepatic somatic index) abbreviation are used interchangeably to refer to HSI. Not hard re-coded for sake of not potentially introducing typos.
+
+## QA/QC and exclusion of extreme outliers for HSI
+```{r 77 chunk HSI QA/QC, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+# Constructing dataframe to define upper and lower bounds for outlier exclusion
+x2207.physio.df.sum <- x2207.physio.df %>%
+  group_by(Treatment, NF_Stage, Sex) %>% 
+  filter(Sex == "Male" | Sex == "Female") %>%
+  dplyr::summarize(q1 = quantile(LSI, 0.25, na.rm=TRUE),
+            mean = mean(LSI),
+            q3 = quantile(LSI, 0.75, na.rm=TRUE)) %>%
+  mutate(IQR = q3 - q1) %>%
+  mutate(upper_LSI = (q3 + ((2)*IQR))) %>%
+  mutate(lower_LSI = (q1 - ((2)*IQR))) %>%
+  dplyr::select(Treatment, NF_Stage, Sex, upper_LSI, lower_LSI)
+
+# str(x2207.physio.df) # indicates n=215 prior to exclusions
+
+# Joining to add in upper and lower bounds for outliers detection
+x2207.physio.df.LSIBounds <- left_join(x2207.physio.df, x2207.physio.df.sum, by=c("Treatment", "NF_Stage", "Sex"))
+
+# Dataframe that excludes extreme outliers based on upper and lower bounds calculated lines 342-351
+x2207.physio.df.LSIBounds.NO2 <- x2207.physio.df.LSIBounds %>%
+  group_by(Treatment, NF_Stage, Sex) %>%
+  filter(LSI < upper_LSI, LSI > lower_LSI) %>%
+  mutate(Functional_Group = case_when(Treatment == 'Control' ~ 'Control',
+                           Treatment == 'PFOS' | Treatment == 'PFHxS' ~'Sulfonate',
+                          Treatment == 'PFOA' | Treatment == 'PFHxA' ~ 'Carboxylate',
+                          Treatment == 'MIX' ~ "Sulfonate Mixture"))
+
+# Dataframe went from n=215 to n=XXX, excluding 4 replicates (3 of which were samples that either failed to have sex determined or was a mortality)
+# str(x2207.physio.df.smiBounds.NO2) 
+
+# Table indicates that after exclusions, the sex number ranges n=3-9 per treatment and developmental stage
+print(x2207.physio.df.LSIBounds.NO2 %>%
+        group_by(Treatment, NF_Stage, Sex) %>%
+        summarize(Freq=n()), n=21) 
+
+# Setting order of levels for treatment for ease of visualization purposes
+x2207.physio.df.LSIBounds.NO2$Treatment <- factor(x2207.physio.df.LSIBounds.NO2$Treatment, levels=c("Control", "PFHxA", "PFOA", "PFHxS", "PFOS", "MIX"))
+
+x2207.physio.df.LSIBounds.NO2$Functional_Group <- factor(x2207.physio.df.LSIBounds.NO2$Functional_Group, levels=c("Control", "Carboxylate", "Sulfonate", "Mixture"))
+
+```
+
+## Visualization for HSI (all)
+```{r 78 chunk HSI Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Creating DF for Visualizing HSI across Developmental Stages by treatment
+LSIvsTreatment <-  lm(LSI ~ Treatment + NF_Stage, data = x2207.physio.df.LSIBounds.NO2)
+LSIvsTreatment_means <- emmeans(LSIvsTreatment, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+LSIvsTreatment_means_dataframe <- data.frame(LSIvsTreatment_means)  # assigning to dataframe
+
+#Plotting the mean mass by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.LSI.figure <- ggplot(data = x2207.physio.df.LSIBounds.NO2, aes(x = Treatment, y = LSI, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = LSIvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = LSIvsTreatment_means_dataframe, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Males & Females", x=NULL, y="HSI (%)") +
+       scale_y_continuous(breaks = seq(0, 1.8, 0.25), limits = c(0.5, 1.8)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14)) 
+x2207.LSI.figure
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+
+## (Males Only) Visualization for HSI 
+```{r 79 chunk Male HSI Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+x2207.physio.df.males <- x2207.physio.df.LSIBounds.NO2 %>%
+  filter(Sex == "Male")
+
+#Creating DF for Visualizing HSI across Developmental Stages by treatment
+LSIvsTreatment.males <-  lm(LSI ~ Treatment + NF_Stage, data = x2207.physio.df.males)
+LSIvsTreatment_means.males <- emmeans(LSIvsTreatment.males, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+LSIvsTreatment_means_dataframe.males <- data.frame(LSIvsTreatment_means.males)  # assigning to dataframe
+
+#Plotting the mean HSI by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.LSI.figure.males <- ggplot(data = x2207.physio.df.males, aes(x = Treatment, y = LSI, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = LSIvsTreatment_means_dataframe.males, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = LSIvsTreatment_means_dataframe.males, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Males", x=NULL, y="HSI (%)") +
+       scale_y_continuous(breaks = seq(0, 1.8, 0.25), limits = c(0.5, 1.8)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+x2207.LSI.figure.males
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+
+## (Females Only) Visualization for HSI 
+```{r 80 chunk Male HSI Visualization, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+x2207.physio.df.females <- x2207.physio.df.LSIBounds.NO2 %>%
+  filter(Sex == "Female")
+
+#Creating DF for Visualizing HSI across Developmental Stages by treatment
+LSIvsTreatment.females <-  lm(LSI ~ Treatment + NF_Stage, data = x2207.physio.df.females)
+LSIvsTreatment_means.females <- emmeans(LSIvsTreatment.females, ~Treatment + NF_Stage)  # using emmeans to pull marginal means from model
+LSIvsTreatment_means_dataframe.females <- data.frame(LSIvsTreatment_means.females)  # assigning to dataframe
+
+#Plotting the mean HSI by development stage and the CI as a measure of spread, with the raw data behind to see the distribution of experimental units
+x2207.LSI.figure.females <- ggplot(data = x2207.physio.df.females, aes(x = Treatment, y = LSI, group = NF_Stage, color=NF_Stage)) +
+        geom_point(size=0.75, alpha = 0.4, position = position_dodge(width = 0.5)) +
+        geom_point(data = LSIvsTreatment_means_dataframe.females, aes(x = Treatment, y = emmean, group = NF_Stage, colour = NF_Stage), size = 3, position = position_dodge(width = 0.5)) + 
+        geom_errorbar(data = LSIvsTreatment_means_dataframe.females, aes(x = Treatment, y = emmean, ymin = lower.CL, ymax = upper.CL, group = NF_Stage, colour = NF_Stage), width = 0.3, position = position_dodge(width = 0.5)) +
+        scale_color_brewer(name = "NF Stage", palette = "Dark2") +
+        labs(title = "Females", x=NULL, y="HSI (%)") +
+scale_y_continuous(breaks = seq(0, 1.8, 0.25), limits = c(0.5, 1.8)) +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12),
+              axis.text.y=element_text(size=12),
+              axis.title=element_text(size=14), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14), 
+              legend.position = "none") 
+x2207.LSI.figure.females
+
+# Legend Note, green = NF58, orange = NF62, purple = NF66
+```
+
+## ANOVA for HSI between Treatments with Sex (all NF stages)
+```{r 81 chunk HSI ANOVA All NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.LSIBounds.NO2$Sex <- as.factor(x2207.physio.df.LSIBounds.NO2$Sex)
+x2207.physio.df.LSIBounds.NO2$Treatment <- as.factor(x2207.physio.df.LSIBounds.NO2$Treatment)
+x2207.physio.df.LSIBounds.NO2$Block <- as.factor(x2207.physio.df.LSIBounds.NO2$Block)
+x2207.physio.df.LSIBounds.NO2$NF_Stage <- factor(x2207.physio.df.LSIBounds.NO2$NF_Stage, levels = c("58", "62", "66"))
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.LSIBounds.NO2$LSI, x2207.physio.df.LSIBounds.NO2$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+  contrasts(x2207.physio.df.LSIBounds.NO2$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.LSI.car <- aov(LSI~ Block + Sex*NF_Stage*Treatment, data=x2207.physio.df.LSIBounds.NO2)
+    x2207.III.LSI.ANOVA <- Anova(x2207.Anova.LSI.car, type = "III")
+    x2207.III.LSI.ANOVA
+    
+    summary(x2207.Anova.LSI.car)
+    plot(x2207.Anova.LSI.car)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    postHocs.HSI <- glht(x2207.Anova.LSI.car , linfct=mcp(Treatment = "Dunnett"))
+    summary(postHocs.HSI)
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.LSIBounds.NO2 %>%
+        group_by(Treatment, Sex, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+      
+```
+
+## ANOVA Table for aov(HSI ~ Block + Sex * NF Stage * Treatment), Type III
+```{r 82 chunk ANOVA HSI table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.LSI.ANOVA) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.LSI.ANOVA) <- c("(Intercept)", "Block", "Sex", "NF Stage", "PFAS", "Sex:NF Stage", "Sex:PFAS", "NF Stage:PFAS", "Sex:NF Stage:PFAS", "Residuals")
+kable(x2207.III.LSI.ANOVA, digits = 3)
+```
+
+
+## (Males Only) ANOVA for HSI between Treatments (all NF stages)
+```{r 83 chunk HSI ANOVA males All NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.male <- x2207.physio.df.LSIBounds.NO2 %>%
+  filter(Sex == "Male")
+x2207.physio.df.male$Treatment <- as.factor(x2207.physio.df.male$Treatment)
+x2207.physio.df.male$Block <- as.factor(x2207.physio.df.male$Block)
+x2207.physio.df.male$NF_Stage <- factor(x2207.physio.df.male$NF_Stage, levels = c("58", "62", "66"))
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.male$LSI, x2207.physio.df.male$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+    NF58.BL <- c(-2,1,1)
+    NF62.BL <- c(0,-1,1)
+    contrasts(x2207.physio.df.male$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.LSI.car <- aov(LSI~ Block + NF_Stage*Treatment, data=x2207.physio.df.male)
+    x2207.III.LSI.ANOVA.male <- Anova(x2207.Anova.LSI.car, type = "III")
+    x2207.III.LSI.ANOVA.male 
+    
+    summary(x2207.Anova.LSI.car)
+    plot(x2207.Anova.LSI.car)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    #Not necessary
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.male %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+      
+```
+
+## (Males Only) ANOVA Table for aov(HSI ~ Block + NF Stage * Treatment), Type III
+```{r 84 chunk ANOVA males HSI table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.LSI.ANOVA.male) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.LSI.ANOVA.male) <- c("(Intercept)", "Block", "NF Stage", "PFAS", "NF Stage:PFAS", "Residuals")
+kable(x2207.III.LSI.ANOVA.male, digits = 3)
+```
+
+## (Females Only) ANOVA for HSI between Treatments (all NF stages)
+```{r 85 chunk HSI ANOVA Females All NF, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Step1 — enter data and ensure variables intended to be factors treated appropriately
+x2207.physio.df.female <- x2207.physio.df.LSIBounds.NO2 %>%
+  filter(Sex == "Female")
+x2207.physio.df.female$Treatment <- as.factor(x2207.physio.df.female$Treatment)
+x2207.physio.df.female$Block <- as.factor(x2207.physio.df.female$Block)
+x2207.physio.df.female$NF_Stage <- factor(x2207.physio.df.female$NF_Stage, levels = c("58", "62", "66"))
+
+#Step 2 -- levene's test
+  leveneTest(x2207.physio.df.female$LSI, x2207.physio.df.female$Treatment, center=median) #non-significant
+  
+#Step 3 -- construct/choose your contrasts
+  #Choosing to use post-hoc testing
+  NF58.BL <- c(-2,1,1)
+  NF62.BL <- c(0,-1,1)
+ contrasts(x2207.physio.df.female$NF_Stage) <- cbind(NF58.BL, NF62.BL)
+  
+#Step 4 -- Compute the ANOVA
+    x2207.Anova.LSI.car <- aov(LSI~ Block + NF_Stage*Treatment, data=x2207.physio.df.female)
+    x2207.III.LSI.ANOVA.female <- Anova(x2207.Anova.LSI.car, type = "III")
+    x2207.III.LSI.ANOVA.female 
+    
+    summary(x2207.Anova.LSI.car)
+    plot(x2207.Anova.LSI.car)
+
+#Step 5 -- Compute contrasts or post-hoc tests 
+    postHocs.HSI.female <- glht(x2207.Anova.LSI.car , linfct=mcp(Treatment = "Dunnett"))
+    summary(postHocs.HSI.female) 
+  
+    # Table to show sample sizes by sex across treatments
+      print(x2207.physio.df.female %>%
+        group_by(Treatment, NF_Stage) %>%
+        summarize(Freq=n()), n=21)
+      
+```
+
+## (Females Only) ANOVA Table for aov(HSI ~ Block + NF Stage * Treatment), Type III
+```{r 84 chunk ANOVA Females HSI table, echo=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+#printing table with x2207 ANOVA output
+options(knitr.kable.NA = '') #hiding missing values on the table for a cleaner look
+colnames(x2207.III.LSI.ANOVA.female) <- c("SS", "df", "$F$", "$p$") #modifying column names for cleaner look
+rownames(x2207.III.LSI.ANOVA.female) <- c("(Intercept)", "Block", "NF Stage", "PFAS", "NF Stage:PFAS", "Residuals")
+kable(x2207.III.LSI.ANOVA.female, digits = 3)
+```
+
+
+# Multivariate Cox Analysis for Time-to-Stage (i.e. NF Developmental Stage)
+
+## Call packages for Cox Analysis
+```{r}
+library(tidyverse) #data manipulation
+library(survival) #for coxph analysis
+library(survminer) #for visualization
+
+```
+
+## Import data for Cox Analysis
+```{r NF 58 Cox analysis, echo=FALSE, include=FALSE}
+Cox.analysis <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/x2207_CF.090_CF.091_Digitized_CoxAnalysis_010323.csv")
+
+x2207.finalsex.num <- x2207.finalsex %>%
+  mutate(Sex=case_when(
+    .$Sex=="Male" ~ 1,
+    .$Sex=="Female" ~ 2
+      ))
+
+Cox.analysis.joined <- left_join(Cox.analysis, x2207.finalsex.num, by="Individual_ID")
+
+Cox.NF58 <- Cox.analysis.joined %>%
+  filter(NF_Stage == "58")
+str(Cox.NF58)
+
+Cox.NF62 <- Cox.analysis.joined %>%
+  filter(NF_Stage == "62")
+str(Cox.NF62)
+
+Cox.NF66 <- Cox.analysis.joined %>%
+  filter(NF_Stage == "66")
+str(Cox.NF66)
+```
+
+
+## NF58 Cox Analysis
+### Plot data, look for outliers:
+```{r NF58 2.5}
+#check with graph:
+plot(time~treatasnum, data= Cox.NF58) 
+
+```
+
+
+### Set up cox model - can include interactions if desired 
+```{r NF58 3}
+#set up cox analysis:
+
+#NF58
+Cox.NF58$treatasnum<-as.factor(Cox.NF58$treatasnum)
+Cox.NF58$Sex<-as.factor(Cox.NF58$Sex)
+coxfit2 <- coxph(Surv(time, status)~treatasnum+Sex, data=Cox.NF58)
+summary(coxfit2)  
+anova(coxfit2) # Looks that PFOS was close to significant, indicating may have weak evidence animals staged out earlier relative to other treatments; Potenital does not appear to hold for later stages
+
+```
+
+```{r NF58 pub graph}
+#publishable graph: 
+Cox.NF58$treatasnum<-as.numeric(Cox.NF58$treatasnum)
+fit.58 <- survfit(Surv(time, status) ~ treatasnum, data = Cox.NF58)
+ggsurvplot(fit.58, conf.int = FALSE, legend.labs=c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"), ggtheme = theme_minimal())
+
+```
+
+
+## NF62
+### Plot data, look for outliers:
+```{r chunk 92 NF62 2.5}
+#check with graph:
+plot(time~treatasnum, data=Cox.NF62)
+
+```
+
+### Set up cox model - can include interactions if desired 
+```{r chunk 93 NF62 3}
+#set up cox analysis:
+
+#NF62
+Cox.NF62$treatasnum<-as.factor(Cox.NF62$treatasnum)
+Cox.NF62$Sex<-as.factor(Cox.NF62$Sex)
+coxfit2 <- coxph(Surv(time, status)~treatasnum+Sex, data=Cox.NF62)
+summary(coxfit2)  
+anova(coxfit2)
+
+```
+
+```{r chunk 94 NF62 pub graph}
+#publishable graph: 
+Cox.NF62$treatasnum<-as.numeric(Cox.NF62$treatasnum)
+fit.62 <- survfit(Surv(time, status) ~ treatasnum, data = Cox.NF62)
+ggsurvplot(fit.62, conf.int = FALSE, legend.labs=c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"),ggtheme = theme_minimal())
+
+```
+
+## NF66
+### Plot data, look for outliers:
+```{r chunk 95 NF66 2.5}
+#check with graph:
+plot(time~treatasnum, data= Cox.NF66)
+#looks realistic that there would be no effect of treatment on survival
+#since the early death from the highest treatment was censored bc it was user error
+```
+
+### Set up cox model - can include interactions if desired 
+```{r chunk 96 NF66 3}
+#set up cox analysis:
+
+#NF62
+Cox.NF66$treatasnum<-as.factor(Cox.NF66$treatasnum)
+Cox.NF66$Sex<-as.factor(Cox.NF66$Sex)
+coxfit2 <- coxph(Surv(time, status)~treatasnum+Sex, data=Cox.NF66)
+summary(coxfit2)  
+anova(coxfit2)
+
+```
+
+```{r chunk 97 NF66 pub graph}
+#publishable graph: 
+Cox.NF66$treatasnum<-as.numeric(Cox.NF66$treatasnum)
+fit.66 <- survfit(Surv(time, status) ~ treatasnum, data = Cox.NF66)
+ggsurvplot(fit.66, conf.int = FALSE, legend.labs=c("Control", "MIX", "PFHxA", "PFHxS", "PFOA", "PFOS"),ggtheme = theme_minimal())
+
+# Plotting a curve by sex to visualize weak evidence for a difference in time-to-stage for sexes; not stark, nor biologically substantial.
+fit.66.sex <- survfit(Surv(time, status) ~ Sex, data = Cox.NF66) 
+ggsurvplot(fit.66.sex, conf.int = FALSE, legend.labs=c("Male", "Female"),ggtheme = theme_minimal())
+
+```
+
+
+
+
+
+
+
+
+
+

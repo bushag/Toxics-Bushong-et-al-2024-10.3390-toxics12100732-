@@ -1,0 +1,194 @@
+---
+title: "Effects of perfluorinated alkyl substances (PFAS) on amphibian body & liver condition: Is lipid metabolism being perturbed throughout metamorphosis?"
+author: "Anna Bushong"
+date: "2024-08-15"
+output: 
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+  word_document: 
+    number_sections: true
+---
+
+```{r 1 chunk setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setting Environment, Loading Dataframes, and Pullint Dataframes
+```{r 2 chunk packages and data, results = 'hide', warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Loading Packages:
+library(effects) # very convenient package for quickly assessing model results
+library(emmeans) # used in the calculation of model means and post-hoc tests
+library(ggplot2) # package for plots
+library(lmodel2) # package for SMA regression for smi
+library(car) # multivariate stats, specifically ancova
+library(lmerTest) # lets you output p-values with summary calls on lme4
+library(dplyr) # data manipulation
+library(tidyr) # needed for data manipulation at end of code
+library(lattice) #package essential for data visualization
+library(ggpubr) #package for ggarrange
+library(stringr) #package for plot title manipulation 
+library(rstatix) #package for identifying outliers based on IQR method
+library(multcomp) #package for post-hoc testing
+library(knitr) #for table formatting
+library(gtExtras) #for table formatting
+library(gt) #for table formatting
+library(ggbreak)
+```
+
+# Heatmap for log2 fold change for relative ion intensity 
+```{r heatmap relative, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+#Webpage referenced: https://ggplot2.tidyverse.org/reference/scale_gradient.html
+
+relativeheatmap.df <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/MRM Profiling Data/MetaboAnalyst csv/Coallated Relative Metaboanalyst csv 1023/DF for Heatmaps/012424_RelativeLipidHeatMap_CovariateSpatialBlockNFStageSex_FormattedForFigInR.csv") #012424 corrected dataframe
+
+
+relativeheatmap.df$Contrast <- factor(relativeheatmap.df$Contrast, levels = c("PFHxA", "PFHxS", "PFOA", "PFOS", "MIX")) #setting variables as factor to order them in the way I want them to appear on heatmap
+
+unique(relativeheatmap.df$Contrast) #checking reordering done correctly
+
+relativeheatmap.df$Tentative_Lipid_ID <- factor(relativeheatmap.df$Tentative_Lipid_ID, levels=rev(sort(unique(relativeheatmap.df$Tentative_Lipid_ID)))) #Sorting my lipid species alphabetically so they appear by lipid group
+
+
+#With CAR from 110523
+#row 65-78 is 103023
+relativeheatmap.df.car110523 <- relativeheatmap.df %>%
+  filter(!row_number() %in% c(65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78))
+
+relativeheatmap.df.car110523$Contrast <- factor(relativeheatmap.df.car110523$Contrast, levels = c("PFHxA", "PFHxS", "PFOA", "PFOS", "MIX")) #setting variables as factor to order them in the way I want them to appear on heatmap
+
+  #str(relativeheatmap.df.car110523)
+
+#Ensuring variables treated appropriately via specification
+relativeheatmap.df.car110523$logFoldC <- as.numeric(relativeheatmap.df.car110523$logFoldC)
+unique(relativeheatmap.df.car110523$Contrast) #checking reordering done correctly
+
+
+relativeheatmap <- ggplot(relativeheatmap.df.car110523, aes(x = Contrast, y = Tentative_Lipid_ID, fill = logFoldC)) +
+  geom_tile(color = "black") + 
+  scale_fill_gradient2(low = "darkblue", #I have no upregulation for my lipids, so only blue will appear, other scale_fill_gradient function designed has some preset gradients available to pick from
+                      mid = "grey",
+                       high = "red") +
+  geom_text(aes(label = logFoldC), color = "white", size = 4) +
+  theme_classic2() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(size=12,face="bold"), #manipulates text on the x axis, in my case chemical treatment or my 'contrast'
+        axis.text.y = element_text(size=8, face="bold")) + #to manipulate text on the y axis, in this case my lipid species names
+  guides(fill=guide_legend(title="log(FC)"))
+relativeheatmap
+
+# NOTE, p-value significance coding done manually in powerpoint
+
+```
+
+# Heatmaps for log2 fold change for semi-quantitative ion intensity 
+
+## "LPC" "LPE" "PC" "PE"  "PS"
+```{r heatmap 1 IS, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+ISheatmap.df <- read.csv("/Users/annabushong/OneDrive - University of Georgia/Sepulveda Working R Scripts & Cleaned DF/x2207/MRM Profiling Data/MetaboAnalyst csv/Coallated IS Metaboanalyst csv 1023/012824_ISLipidHeatMap_CovariateSpatialBlockNFStageSex_FormattedForFigInR.csv")
+
+
+ISheatmap.df$Contrast <- factor(ISheatmap.df$Contrast, levels = c("PFHxA", "PFHxS", "PFOA", "PFOS", "MIX")) #setting variables as factor to order them in the way I want them to appear on heatmap
+
+unique(relativeheatmap.df$Contrast) #checking reordering done correctly
+
+ISheatmap.df$Tentative_Lipid_ID <- factor(ISheatmap.df$Tentative_Lipid_ID, levels=rev(sort(unique(ISheatmap.df$Tentative_Lipid_ID)))) #Sorting my lipid species alphabetically so they appear by lipid group
+
+
+str(ISheatmap.df)
+ISheatmap.df$logFC <- as.numeric(ISheatmap.df$logFC)
+unique(ISheatmap.df$Contrast) #checking reordering done correctly
+
+## Initially when plotted together, IS map was too big, so broke it apart into the following
+
+# Heat Map for "LPC" "LPE" "PC"  "PE"  "PS"
+
+ISheatmap.df.glyco <- ISheatmap.df %>%
+  filter(Lipid_Class == "LPC" | 
+           Lipid_Class == "LPE" |
+           Lipid_Class == "PC" |
+           Lipid_Class == "PE" |
+           Lipid_Class == "PS")
+
+unique(ISheatmap.df.glyco$Lipid_Class)
+ISheatmap.df.glyco$Contrast <- factor(ISheatmap.df.glyco$Contrast, levels = c("PFHxA", "PFHxS", "PFOA", "PFOS", "MIX")) #setting variables as factor to order them in the way I want them to appear on heatmap
+
+unique(relativeheatmap.df$Contrast) #checking reordering done correctly
+
+ISheatmap.df.glyco$Tentative_Lipid_ID <- factor(ISheatmap.df.glyco$Tentative_Lipid_ID, levels=sort(unique(ISheatmap.df.glyco$Tentative_Lipid_ID))) #Sorting my lipid species alphabetically so they appear by lipid group
+
+
+str(ISheatmap.df.glyco)
+
+ISheatmap.df.glyco$logFC <- as.numeric(ISheatmap.df.glyco$logFC)
+ISheatmap.df.glyco$logFC <- round(ISheatmap.df.glyco$logFC, digits = 3)
+
+unique(ISheatmap.df.glyco$Contrast) #checking reordering done correctly
+
+ISheatmap.glyco <- ggplot(ISheatmap.df.glyco, aes(x = Contrast, y = Tentative_Lipid_ID, fill = logFC, group = )) +
+  geom_tile(color = "black") + 
+  scale_fill_gradient2(low = "darkblue", #I have no upregulation for my lipids, so only blue will appear, other scale_fill_gradient function designed has some preset gradients available to pick from
+                      mid = "grey",
+                       high = "red3") +
+  geom_text(aes(label = logFC), color = "white", size = 2) +
+  theme_classic2() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(size=12,face="bold"), #manipulates text on the x axis, in my case chemical treatment or my 'contrast'
+        axis.text.y = element_text(size=8, face="bold")) + #to manipulate text on the y axis, in this case my lipid species names
+  guides(fill=guide_legend(title="log(FC)"))
+ISheatmap.glyco
+
+# NOTE, p-value significance coding done manually in powerpoint
+```
+
+## Heatmap for "SM"  "CE"  "DG"  "TG"
+```{r heatmap 2 IS, warning=FALSE, message=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=85)}
+
+ISheatmap.df.storage <- ISheatmap.df %>%
+  filter(Lipid_Class == "SM" | 
+           Lipid_Class == "CE" |
+           Lipid_Class == "DG" |
+           Lipid_Class == "TG")
+
+unique(ISheatmap.df.storage$Lipid_Class)
+ISheatmap.df.storage$Contrast <- factor(ISheatmap.df.storage$Contrast, levels = c("PFHxA", "PFHxS", "PFOA", "PFOS", "MIX")) #setting variables as factor to order them in the way I want them to appear on heatmap
+
+unique(relativeheatmap.df$Contrast) #checking reordering done correctly
+
+ISheatmap.df.storage$Tentative_Lipid_ID <- factor(ISheatmap.df.storage$Tentative_Lipid_ID, levels=sort(unique(ISheatmap.df.storage$Tentative_Lipid_ID))) #Sorting my lipid species alphabetically so they appear by lipid group
+
+
+str(ISheatmap.df.storage)
+
+ISheatmap.df.storage$logFC <- as.numeric(ISheatmap.df.storage$logFC)
+ISheatmap.df.storage$logFC <- round(ISheatmap.df.storage$logFC, digits = 3)
+
+unique(ISheatmap.df.storage$Contrast) #checking reordering done correctly
+
+ISheatmap.storage <- ggplot(ISheatmap.df.storage, aes(x = Contrast, y = Tentative_Lipid_ID, fill = logFC, group = )) +
+  geom_tile(color = "black") + 
+  scale_fill_gradient2(low = "darkblue", #I have no upregulation for my lipids, so only blue will appear, other scale_fill_gradient function designed has some preset gradients available to pick from
+                      mid = "grey",
+                       high = "red3") +
+  geom_text(aes(label = logFC), color = "white", size = 2) +
+  theme_classic2() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(size=12,face="bold"), #manipulates text on the x axis, in my case chemical treatment or my 'contrast'
+        axis.text.y = element_text(size=8, face="bold")) + #to manipulate text on the y axis, in this case my lipid species names
+  guides(fill=guide_legend(title="log(FC)"))
+ISheatmap.storage
+
+# NOTE, p-value significance coding done manually in powerpoint
+````
