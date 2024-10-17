@@ -1,0 +1,10 @@
+﻿Variable,Description
+Treatment,PFAS chemical treatment 
+Block,Spatial experimental block designation for study
+NF,Nieuwkoop Faber stage of animal on date of sampling
+Sex,Genetic sex designated to individual following visualization of PCR product of DM-W and DMRT
+Individual_ID,Unique Individual ID assigned to animals of treatment (number out of 36)
+Lipid_name,Tentative lipid ID(s) associated with MRM-transition
+Signal,Numbers represent either relative ion intensity (tentative lipid ID as % of profile) or ion intesity adjusted to internal standard for lipid class
+MRM_Method,Variable indicating the method MRM-transitions were grouped for mass spectometry
+MRM_AnalysisType,Variable indicating whether signal represents relative ion intensity or ion intesity adjusted to internal standard for lipid class
