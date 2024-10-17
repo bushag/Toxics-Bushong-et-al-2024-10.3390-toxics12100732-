@@ -1,0 +1,10 @@
+﻿Variable,Description
+Individual_ID,Unique Individual ID assigned to animals of treatment (number out of 36)
+Quick_ID,ID assigned to Individual ID during DNA extraction
+Sex,Genetic sex designated to individual following visualization of PCR product of DM-W and DMRT
+Redo,Designation of whether more tissue should be harvested to redo extraction and PCR due to fainter bands
+260/280,Absorption ratio for sample at 260 nm and 280 nm from a Nanodrop 8000 Spectophotometer
+260/230,Absorption ratio for sample at 260 nm and 230 nm from a Nanodrop 8000 Spectophotometer
+[DNA],Concentration of DNA measured using a Nanodrop 8000 Spectophotometer
+Notes,Additional notes regarding sample 
+Group,Number designated to group of samples for extractrion
