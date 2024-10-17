@@ -1,0 +1,21 @@
+﻿Variable,Description
+Org_Order,"Order of data entry, dummy variable used for sorting"
+Date,Calendar that animal was dissected during 2022 study
+Experimental_Day,Days since initiation of exposure 
+dpf,Days since fertilizations (i.e. days post fertilization)
+Treatment,PFAS chemical treatment 
+Individual_ID,Unique Individual ID assigned to animals of treatment (number out of 36)
+#_Individual_ID,Number associated with individual ID for sorting purposes
+Block,Spatial experimental block designation for study
+NF_Stage,Nieuwkoop Faber stage of animal on date of sampling
+SVL,Snout Vent Length
+Mass,Wet mass of animal taken following euthenasia (after blotting on either side) 
+Time_Death,Time animal was immersed in MS-222 for euthenasia 
+Scoliosis,"Designation of whether animal visually had signs of scoliosis; Y = Yes, N = No"
+Severity,"Severity of scoliosis if present; Categories: very mild =  barely visible but present and midline maintained, mild = can see it but midline maintained - not obvious while swimming, medium = obvious while swimming but midline maintained, severe = midline not maintained"
+Fat_Body_Mass,Wet mass of left and right fat bodies exised after blotting on weigh boat
+Whole_Liver_Mass,Wet mass of whole liver after blotting on weigh boat 
+HSI,"Hepatic somatic index calculated using whole liver mass, dividing by mass, and multiplying by 100 "
+Mol_Liver_Mass,Wet mass of subsample of liver stored in RNAlater for molecular work
+Tail_Clip,Wet mass of end of tail or toe clips flash frozen for genetic sexing
+Post_Dissection_Wet_Mass,Wet mass of carcass after exising organs of interest and harvesting tail clip
